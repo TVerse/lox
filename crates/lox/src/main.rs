@@ -1,10 +1,8 @@
+use anyhow::Result;
 use clap::Parser;
 use env_logger::Builder;
 use log::LevelFilter;
-use lox::chunk::{Chunk, Opcode};
-use lox::value::Value;
-use lox::vm::VM;
-use std::error::Error;
+use std::io::BufRead;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -13,33 +11,34 @@ struct Args {
     file: Option<PathBuf>,
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let _args = Args::parse();
-
+fn main() -> Result<()> {
     init_logger();
+    let args = Args::parse();
 
-    let mut chunk = Chunk::new("main".to_string());
-    let constant = chunk.add_constant(Value::new(1.2));
-    chunk.add_byte(Opcode::Constant.as_byte(), 1);
-    chunk.add_byte(constant, 2);
+    if let Some(path) = args.file {
+        run_file(&path)?;
+    } else {
+        repl()?
+    }
 
-    let constant = chunk.add_constant(Value::new(3.4));
-    chunk.add_byte(Opcode::Constant.as_byte(), 1);
-    chunk.add_byte(constant, 1);
+    Ok(())
+}
 
-    chunk.add_byte(Opcode::Add.as_byte(), 1);
+fn repl() -> Result<()> {
+    let stdin = std::io::stdin();
+    for line in stdin.lock().lines() {
+        let line = line?;
+        if line.len() == 0 {
+            break;
+        }
+        todo!();
+    }
+    Ok(())
+}
 
-    let constant = chunk.add_constant(Value::new(5.6));
-    chunk.add_byte(Opcode::Constant.as_byte(), 1);
-    chunk.add_byte(constant, 1);
-
-    chunk.add_byte(Opcode::Divide.as_byte(), 1);
-
-    chunk.add_byte(Opcode::Negate.as_byte(), 1);
-    chunk.add_byte(Opcode::Return.as_byte(), 1);
-
-    let mut vm = VM::new();
-    vm.interpret(&chunk)?;
+fn run_file(path: &PathBuf) -> Result<()> {
+    let contents = std::fs::read_to_string(path)?;
+    todo!();
     Ok(())
 }
 

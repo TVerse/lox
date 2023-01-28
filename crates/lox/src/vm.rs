@@ -1,6 +1,7 @@
-use arrayvec::ArrayVec;
 use crate::chunk::{Chunk, Opcode};
+use crate::compiler::Compiler;
 use crate::value::Value;
+use arrayvec::ArrayVec;
 use log::trace;
 use num_enum::TryFromPrimitiveError;
 use thiserror::Error;
@@ -11,6 +12,7 @@ pub struct VM {
     ip: usize,
     // could this be a list of refs? Runs into lifetime issues!
     stack: ArrayVec<Value, STACK_SIZE>,
+    compiler: Compiler,
 }
 
 impl VM {
@@ -18,18 +20,20 @@ impl VM {
         Self {
             ip: 0,
             stack: ArrayVec::new(),
+            compiler: Compiler::new(),
         }
     }
 
-    pub fn interpret(&mut self, chunk: &Chunk) -> Result<(), InterpretError> {
+    pub fn interpret(&mut self, source: &str) -> Result<(), InterpretError> {
         self.ip = 0;
-        self.run(chunk)
+
+        todo!()
     }
 
     fn run(&mut self, chunk: &Chunk) -> Result<(), InterpretError> {
         // TODO some kind of iterator?
         loop {
-            trace!("Stack:\n{stack:?}", stack=self.stack);
+            trace!("Stack:\n{stack:?}", stack = self.stack);
             trace!(
                 "Instruction at {ip}: {instruction}",
                 ip = self.ip,
@@ -46,8 +50,8 @@ impl VM {
                 Opcode::Return => {
                     let val = self.pop()?;
                     println!("{}", val);
-                    break
-                },
+                    break;
+                }
                 Opcode::Negate => {
                     let value = self.pop()?;
                     let new_value = match value {
@@ -85,8 +89,10 @@ impl VM {
         Ok(constant)
     }
 
-    fn push(&mut self, value: Value) -> Result<(), RuntimeError>{
-        self.stack.try_push(value).map_err(|_|RuntimeError::StackOverflow)
+    fn push(&mut self, value: Value) -> Result<(), RuntimeError> {
+        self.stack
+            .try_push(value)
+            .map_err(|_| RuntimeError::StackOverflow)
     }
 
     fn pop(&mut self) -> Result<Value, CompileError> {

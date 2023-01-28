@@ -89,22 +89,30 @@ impl Chunk {
         result
     }
 
-    fn write_single_instruction(&self, iter: &mut impl Iterator<Item=(usize, (u8, u16))>, result: &mut String, opcode: u8) {
+    fn write_single_instruction(
+        &self,
+        iter: &mut impl Iterator<Item = (usize, (u8, u16))>,
+        result: &mut String,
+        opcode: u8,
+    ) {
         write!(
             result,
             "{}",
             if let Ok(opcode) = Opcode::try_from(opcode) {
                 match opcode {
-                    Opcode::Return | Opcode::Negate | Opcode::Add | Opcode::Subtract | Opcode::Multiply | Opcode::Divide => simple_instruction(opcode),
-                    Opcode::Constant => {
-                        self.constant_instruction(opcode, iter.next().map(code))
-                    }
+                    Opcode::Return
+                    | Opcode::Negate
+                    | Opcode::Add
+                    | Opcode::Subtract
+                    | Opcode::Multiply
+                    | Opcode::Divide => simple_instruction(opcode),
+                    Opcode::Constant => self.constant_instruction(opcode, iter.next().map(code)),
                 }
             } else {
                 format!("Unknown opcode 0x{opcode:02x}")
             }
         )
-            .unwrap();
+        .unwrap();
     }
 
     pub fn disassemble_instruction_at(&self, idx: usize) -> Option<String> {

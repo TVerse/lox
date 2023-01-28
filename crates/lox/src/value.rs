@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Clone)]
 pub enum Value {
-    Number(f64)
+    Number(f64),
 }
 
 impl Value {
@@ -13,8 +13,12 @@ impl Value {
 
 impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", match self {
-            Value::Number(num) => num
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                Value::Number(num) => num,
+            }
+        )
     }
 }
