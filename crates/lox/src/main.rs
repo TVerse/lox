@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use env_logger::Builder;
 use log::LevelFilter;
+use lox::interpret;
 use std::io::BufRead;
 use std::path::PathBuf;
 
@@ -28,17 +29,17 @@ fn repl() -> Result<()> {
     let stdin = std::io::stdin();
     for line in stdin.lock().lines() {
         let line = line?;
-        if line.len() == 0 {
+        if line.is_empty() {
             break;
         }
-        todo!();
+        interpret(&line)?;
     }
     Ok(())
 }
 
 fn run_file(path: &PathBuf) -> Result<()> {
     let contents = std::fs::read_to_string(path)?;
-    todo!();
+    interpret(&contents)?;
     Ok(())
 }
 

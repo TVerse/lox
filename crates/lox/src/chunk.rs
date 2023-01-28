@@ -83,7 +83,7 @@ impl Chunk {
                 }
             }
             self.write_single_instruction(&mut iter, &mut result, opcode);
-            writeln!(result, "").unwrap();
+            writeln!(result).unwrap();
         }
 
         result

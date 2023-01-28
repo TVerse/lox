@@ -1,5 +1,4 @@
 use crate::chunk::{Chunk, Opcode};
-use crate::compiler::Compiler;
 use crate::value::Value;
 use arrayvec::ArrayVec;
 use log::trace;
@@ -12,7 +11,6 @@ pub struct VM {
     ip: usize,
     // could this be a list of refs? Runs into lifetime issues!
     stack: ArrayVec<Value, STACK_SIZE>,
-    compiler: Compiler,
 }
 
 impl VM {
@@ -20,17 +18,10 @@ impl VM {
         Self {
             ip: 0,
             stack: ArrayVec::new(),
-            compiler: Compiler::new(),
         }
     }
 
-    pub fn interpret(&mut self, source: &str) -> Result<(), InterpretError> {
-        self.ip = 0;
-
-        todo!()
-    }
-
-    fn run(&mut self, chunk: &Chunk) -> Result<(), InterpretError> {
+    pub fn run(&mut self, chunk: &Chunk) -> Result<(), InterpretError> {
         // TODO some kind of iterator?
         loop {
             trace!("Stack:\n{stack:?}", stack = self.stack);

@@ -1,6 +1,6 @@
-use std::iter::{FusedIterator, Peekable, Scan};
+use std::iter::FusedIterator;
 use thiserror::Error;
-use unicode_segmentation::{GraphemeIndices, Graphemes, UnicodeSegmentation};
+use unicode_segmentation::UnicodeSegmentation;
 
 static NEWLINE_GRAPHEMES: &[&str] = &["\r", "\n", "\r\n"];
 static DIGITS: &[&str] = &["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
@@ -14,7 +14,7 @@ static UPPERCASE_LETTERS: &[&str] = &[
     "T", "U", "V", "W", "X", "Y", "Z",
 ];
 
-static UNDERSCORE: &str = "_";
+static UNDERSCORE: &[&str] = &["_"];
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TokenContents<'a> {
@@ -354,7 +354,7 @@ impl<'a> Iterator for SourceIterator<'a> {
         let c = self.get_and_advance()?;
         let res = self
             .match_token(c)
-            .or_else(|| Some(Err(ScanError::UnknownToken(c))));
+            .or(Some(Err(ScanError::UnknownToken(c))));
         self.reset();
         res
     }
