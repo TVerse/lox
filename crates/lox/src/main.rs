@@ -1,9 +1,10 @@
 use anyhow::Result;
 use clap::Parser;
 use env_logger::Builder;
-use log::LevelFilter;
+use log::{error, LevelFilter};
 use lox::interpret;
 use std::io::BufRead;
+use std::io::Write;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -26,13 +27,19 @@ fn main() -> Result<()> {
 }
 
 fn repl() -> Result<()> {
+    let mut stdout = std::io::stdout();
+    write!(stdout, ">")?;
+    stdout.flush()?;
     let stdin = std::io::stdin();
     for line in stdin.lock().lines() {
         let line = line?;
         if line.is_empty() {
             break;
         }
-        interpret(&line)?;
+        match interpret(&line) {
+            Ok(_) => {}
+            Err(e) => error!("Error: {e}"),
+        }
     }
     Ok(())
 }

@@ -168,7 +168,12 @@ fn code(a: (usize, (u8, usize))) -> u8 {
 
 impl Debug for Chunk {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.disassemble())
+        writeln!(f, "{}", self.disassemble())?;
+        writeln!(f, "Constants:")?;
+        for (i, c) in self.constants.iter().enumerate() {
+            writeln!(f, "{i:04}: {c:?}")?;
+        }
+        Ok(())
     }
 }
 

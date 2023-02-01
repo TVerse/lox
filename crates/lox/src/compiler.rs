@@ -1,8 +1,10 @@
-use std::iter::Peekable;
 use crate::chunk::{Chunk, Opcode};
 use crate::scanner::{ScanError, ScanResult, Token, TokenContents};
-use thiserror::Error;
 use crate::value::Value;
+use log::trace;
+use std::fmt::{Display, Formatter};
+use std::iter::Peekable;
+use thiserror::Error;
 
 type CompileResult<A> = Result<A, CompileErrors>;
 
@@ -41,53 +43,81 @@ impl BindingPower {
     }
 }
 
-pub fn compile<'a>(iter: &'a mut impl Iterator<Item=ScanResult<Token<'a>>>) -> CompileResult<Chunk> {
-    let mut chunk = Chunk::new("main".to_string());
+pub fn compile(iter: &mut impl Iterator<Item = ScanResult<Token>>) -> CompileResult<Chunk> {
+    let chunk = Chunk::new("main".to_string());
     let mut compiler = Compiler::new(iter, chunk);
     compiler.compile()?;
-    let Compiler { chunk, .. } = compiler;
+    let Compiler { mut chunk, .. } = compiler;
+
+    // TODO
+    chunk.add_opcode(Opcode::Return, 0);
+
+    trace!("Emitting chunk:\n{:?}", &chunk);
     Ok(chunk)
 }
 
 struct Compiler<'a> {
-    iter: Peekable<&'a mut dyn Iterator<Item=ScanResult<Token<'a>>>>,
+    iter: Peekable<&'a mut dyn Iterator<Item = ScanResult<Token>>>,
     chunk: Chunk,
 }
 
 impl<'a> Compiler<'a> {
-    fn new(iter: &'a mut impl Iterator<Item=ScanResult<Token<'a>>>, chunk: Chunk) -> Self {
-        let iter: &mut dyn Iterator<Item=ScanResult<Token<'a>>> = iter;
+    fn new(iter: &'a mut impl Iterator<Item = ScanResult<Token>>, chunk: Chunk) -> Self {
+        let iter: &mut dyn Iterator<Item = ScanResult<Token>> = iter;
         Self {
             iter: iter.peekable(),
             chunk,
         }
     }
 
-    fn compile(
-        &mut self,
-    ) -> CompileResult<()> {
+    fn compile(&mut self) -> CompileResult<()> {
         self.compile_bp(BindingPower::None)
     }
 
-    fn compile_bp<'b>(
-        &'b mut self,
-        min_bp: BindingPower,
-    ) -> CompileResult<()> {
+    fn compile_bp(&mut self, min_bp: BindingPower) -> CompileResult<()> {
         let mut errors = CompileErrors::new();
 
         if let Some(token) = self.iter.next() {
             match token {
                 Ok(token) => {
-                    if let Some((prefix_rule, _)) = get_parser(token, OperatorType::Prefix) {
-                        if let Err(e) = prefix_rule(self, token) {
+                    if let Some((prefix_rule, _)) = get_parser(&token, OperatorType::Prefix) {
+                        if let Err(e) = prefix_rule(self, &token) {
                             errors.extend(e);
                         }
                     } else {
-                        errors.push(CompileError::GeneralError(format!("No parser found for token {token:?} and type {:?}", OperatorType::Prefix)))
+                        errors.push(CompileError::GeneralError(format!(
+                            "No parser found for token {token:?} and type {:?}",
+                            OperatorType::Prefix
+                        )))
                     }
+                }
+                Err(e) => {
+                    errors.push(e.into());
+                    return Err(errors);
+                }
+            }
+        }
 
-                },
-                Err(e) => errors.push(e.clone().into())
+        while let Some(token) = self.iter.peek() {
+            match token {
+                Ok(token) => {
+                    if let Some((infix_rule, infix_bp)) = get_parser(token, OperatorType::Infix) {
+                        if infix_bp < min_bp {
+                            break;
+                        }
+                        let token = self.iter.next().unwrap().unwrap();
+
+                        if let Err(e) = infix_rule(self, &token) {
+                            errors.extend(e);
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    errors.push(e.clone().into());
+                    break;
+                }
             }
         }
 
@@ -98,33 +128,113 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn parse_unary<'b>(&'b mut self, token: Token<'b>) -> CompileResult<()> {
+    fn parse_unary(&mut self, token: &Token) -> CompileResult<()> {
         self.compile_bp(BindingPower::Unary)?;
         match token.contents {
             TokenContents::Minus => self.chunk.add_opcode(Opcode::Negate, token.line),
-            _ => return Err(CompileError::GeneralError(format!("Unexpected unary token {token:?}")).into()),
+            _ => {
+                return Err(CompileError::GeneralError(format!(
+                    "Unexpected unary token, got {token:?}"
+                ))
+                .into());
+            }
         }
-        self.chunk.add_opcode(Opcode::Negate, token.line);
+        Ok(())
+    }
+
+    fn parse_number(&mut self, token: &Token) -> CompileResult<()> {
+        let number: f64 = match &token.contents {
+            TokenContents::Number(number) => number.parse().expect("Could not parse number"),
+            _ => {
+                return Err(CompileError::GeneralError(format!(
+                    "Expected number, got token {token:?}"
+                ))
+                .into());
+            }
+        };
+        let constant = self
+            .chunk
+            .add_constant(Value::Number(number))
+            .ok_or(CompileError::TooManyConstants)?;
+        self.chunk
+            .add_opcode_and_operand(Opcode::Constant, constant, token.line);
+        Ok(())
+    }
+
+    fn parse_term(&mut self, token: &Token) -> CompileResult<()> {
+        self.compile_bp(BindingPower::Term)?;
+        match token.contents {
+            TokenContents::Plus => self.chunk.add_opcode(Opcode::Add, token.line),
+            TokenContents::Minus => self.chunk.add_opcode(Opcode::Subtract, token.line),
+            _ => {
+                return Err(CompileError::GeneralError(format!(
+                    "Unexpected term token, got {token:?}"
+                ))
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_factor(&mut self, token: &Token) -> CompileResult<()> {
+        self.compile_bp(BindingPower::Factor)?;
+        match token.contents {
+            TokenContents::Asterisk => self.chunk.add_opcode(Opcode::Multiply, token.line),
+            TokenContents::Slash => self.chunk.add_opcode(Opcode::Divide, token.line),
+            _ => {
+                return Err(CompileError::GeneralError(format!(
+                    "Unexpected term token, got {token:?}"
+                ))
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_grouping(&mut self, _token: &Token) -> CompileResult<()> {
+        self.compile_bp(BindingPower::None)?;
+        match self.iter.next() {
+            Some(Ok(token)) => match token.contents {
+                TokenContents::RightParen => {}
+                _ => {
+                    return Err(CompileError::GeneralError(
+                        "Unmatched opening parenthesis".to_owned(),
+                    )
+                    .into());
+                }
+            },
+            _ => {
+                return Err(
+                    CompileError::GeneralError("Unmatched opening parenthesis".to_owned()).into(),
+                );
+            }
+        }
         Ok(())
     }
 }
 
-fn get_parser(token: Token, operator_type: OperatorType) -> Option<(Parser, BindingPower)> {
-    match (token.contents, operator_type) {
-        (TokenContents::Minus, OperatorType::Prefix) => Some((Compiler::parse_unary, BindingPower::Unary)),
-        _ => None
+fn get_parser<'a, 'b>(
+    token: &'b Token,
+    operator_type: OperatorType,
+) -> Option<(Parser<'a, 'b>, BindingPower)> {
+    match (&token.contents, operator_type) {
+        (TokenContents::Minus, OperatorType::Prefix) => {
+            Some((Compiler::parse_unary, BindingPower::Unary))
+        }
+        (TokenContents::Number(_), OperatorType::Prefix) => {
+            Some((Compiler::parse_number, BindingPower::None))
+        }
+        (TokenContents::Plus | TokenContents::Minus, OperatorType::Infix) => {
+            Some((Compiler::parse_term, BindingPower::Term))
+        }
+        (TokenContents::Asterisk | TokenContents::Slash, OperatorType::Infix) => {
+            Some((Compiler::parse_factor, BindingPower::Factor))
+        }
+        (TokenContents::LeftParen, OperatorType::Prefix) => {
+            Some((Compiler::parse_grouping, BindingPower::None))
+        }
+        _ => None,
     }
-}
-
-fn emit_return(chunk: &mut Chunk, line: usize) {
-    chunk.add_opcode(Opcode::Return, line);
-}
-
-fn number(chunk: &mut Chunk, line: usize, number: &str) -> Result<(), CompileError> {
-    let number: f64 = number.parse().unwrap();
-    let constant = chunk.add_constant(Value::Number(number)).ok_or(CompileError::TooManyConstants)?;
-    chunk.add_opcode_and_operand(Opcode::Constant, constant, line);
-    Ok(())
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -133,16 +243,27 @@ enum OperatorType {
     Infix,
 }
 
-type Parser<'a> = fn(&'a mut Compiler<'a>, Token<'a>) -> CompileResult<()>;
-
-
-
+type Parser<'a, 'b> = fn(&'b mut Compiler<'a>, &'b Token) -> CompileResult<()>;
 
 // TODO custom Display
 #[derive(Error, Debug)]
-#[error("{} error{}", .errors.len(), if.errors.len() == 1 {""} else {"s"})]
 pub struct CompileErrors {
     errors: Vec<CompileError>,
+}
+
+impl Display for CompileErrors {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} compilation error{}",
+            self.errors.len(),
+            if self.errors.len() == 1 { "" } else { "s" }
+        )?;
+        for e in self.errors.iter() {
+            writeln!(f, "{e}")?;
+        }
+        Ok(())
+    }
 }
 
 impl CompileErrors {
@@ -183,11 +304,4 @@ pub enum CompileError {
     TooManyConstants,
     #[error("Compile error: {0}")]
     GeneralError(String),
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-
 }
