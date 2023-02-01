@@ -1,7 +1,8 @@
-use crate::compiler::Compiler;
+use crate::compiler::compile;
 use crate::scanner::Scanner;
 use crate::vm::VM;
 use anyhow::Result;
+use log::trace;
 
 pub mod chunk;
 mod compiler;
@@ -10,9 +11,9 @@ pub mod value;
 pub mod vm;
 
 pub fn interpret(source: &str) -> Result<()> {
+    trace!("Got input string: {source}");
     let scanner = Scanner::new(source);
-    let mut compiler = Compiler::new();
-    let chunk = compiler.compile(scanner.iter())?;
+    let chunk = compile(&mut scanner.iter())?;
     let mut vm = VM::new();
     vm.run(&chunk)?;
     Ok(())

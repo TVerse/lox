@@ -26,7 +26,7 @@ pub struct Chunk {
     code: Vec<u8>,
     constants: Vec<Value>,
     name: String,
-    lines: Vec<u16>,
+    lines: Vec<usize>,
 }
 
 impl Chunk {
@@ -39,21 +39,34 @@ impl Chunk {
         }
     }
 
-    pub fn add_byte(&mut self, byte: u8, line: u16) {
+    fn add_byte(&mut self, byte: u8, line: usize) {
         self.code.push(byte);
         self.lines.push(line);
     }
 
-    pub fn add_constant(&mut self, value: Value) -> u8 {
-        self.constants.push(value);
-        (self.constants.len() - 1) as u8
+    pub fn add_opcode(&mut self, opcode: Opcode, line: usize) {
+        self.add_byte(opcode.as_byte(), line)
+    }
+
+    pub fn add_opcode_and_operand(&mut self, opcode: Opcode, operand: u8, line: usize) {
+        self.add_byte(opcode.as_byte(), line);
+        self.add_byte(operand, line);
+    }
+
+    pub fn add_constant(&mut self, value: Value) -> Option<u8> {
+        if self.constants.len() < 256 {
+            self.constants.push(value);
+            Some((self.constants.len() - 1) as u8)
+        } else {
+            None
+        }
     }
 
     pub fn get_constant(&self, index: u8) -> Option<&Value> {
         self.constants.get(index as usize)
     }
 
-    fn code_line_iter(&self) -> impl Iterator<Item = (u8, u16)> + '_ {
+    fn code_line_iter(&self) -> impl Iterator<Item = (u8, usize)> + '_ {
         self.code.iter().copied().zip(self.lines.iter().copied())
     }
 
@@ -62,7 +75,7 @@ impl Chunk {
 
         let mut result = String::new();
 
-        let mut previous_line: Option<u16> = None;
+        let mut previous_line: Option<usize> = None;
 
         writeln!(result, "== {} ==", self.name).unwrap();
 
@@ -91,7 +104,7 @@ impl Chunk {
 
     fn write_single_instruction(
         &self,
-        iter: &mut impl Iterator<Item = (usize, (u8, u16))>,
+        iter: &mut impl Iterator<Item = (usize, (u8, usize))>,
         result: &mut String,
         opcode: u8,
     ) {
@@ -149,13 +162,18 @@ fn simple_instruction(opcode: Opcode) -> String {
     format!("{opcode:?}")
 }
 
-fn code(a: (usize, (u8, u16))) -> u8 {
+fn code(a: (usize, (u8, usize))) -> u8 {
     a.1 .0
 }
 
 impl Debug for Chunk {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.disassemble())
+        writeln!(f, "{}", self.disassemble())?;
+        writeln!(f, "Constants:")?;
+        for (i, c) in self.constants.iter().enumerate() {
+            writeln!(f, "{i:04}: {c:?}")?;
+        }
+        Ok(())
     }
 }
 
