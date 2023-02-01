@@ -1,6 +1,9 @@
+use std::fmt::Display;
 use std::iter::FusedIterator;
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
+
+pub type ScanResult<A> = Result<A, ScanError>;
 
 static NEWLINE_GRAPHEMES: &[&str] = &["\r", "\n", "\r\n"];
 static DIGITS: &[&str] = &["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
@@ -63,12 +66,12 @@ pub enum TokenContents<'a> {
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub struct Token<'a> {
-    contents: TokenContents<'a>,
-    line: usize,
+    pub contents: TokenContents<'a>,
+    pub line: usize,
 }
 
 impl<'a> Token<'a> {
-    fn new(contents: TokenContents<'a>, line: usize) -> Self {
+    pub fn new(contents: TokenContents<'a>, line: usize) -> Self {
         Self { contents, line }
     }
 }
@@ -190,7 +193,7 @@ impl<'a> SourceIterator<'a> {
         self.source.get(0..advance_len)
     }
 
-    fn string<'b>(&'b mut self) -> Result<Token<'a>, ScanError<'a>> {
+    fn string<'b>(&'b mut self) -> ScanResult<Token<'a>> {
         let starting_line = self.line;
         while let Some(c) = self.peek() {
             if NEWLINE_GRAPHEMES.contains(&c) {
@@ -209,7 +212,7 @@ impl<'a> SourceIterator<'a> {
         }
 
         return Err(ScanError::UnterminatedString(
-            self.get_cur_str().unwrap_or(""),
+            self.get_cur_str().unwrap_or("").to_string(),
         ));
     }
 
@@ -281,7 +284,7 @@ impl<'a> SourceIterator<'a> {
         )
     }
 
-    fn match_token<'b>(&'b mut self, c: &'a str) -> Option<Result<Token<'a>, ScanError<'a>>> {
+    fn match_token<'b>(&'b mut self, c: &'a str) -> Option<ScanResult<Token<'a>>> {
         use TokenContents::*;
         match c {
             "(" => Some(Ok(Token::new(LeftParen, self.line))),
@@ -346,7 +349,7 @@ fn is_letter_or_underscore(c: &str) -> bool {
 }
 
 impl<'a> Iterator for SourceIterator<'a> {
-    type Item = Result<Token<'a>, ScanError<'a>>;
+    type Item = ScanResult<Token<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.skip_whitespace();
@@ -354,7 +357,7 @@ impl<'a> Iterator for SourceIterator<'a> {
         let c = self.get_and_advance()?;
         let res = self
             .match_token(c)
-            .or(Some(Err(ScanError::UnknownToken(c))));
+            .or_else(|| Some(Err(ScanError::UnknownToken(c.to_string()))));
         self.reset();
         res
     }
@@ -362,12 +365,12 @@ impl<'a> Iterator for SourceIterator<'a> {
 
 impl<'a> FusedIterator for SourceIterator<'a> {}
 
-#[derive(Error, Debug, PartialEq)]
-pub enum ScanError<'a> {
+#[derive(Error, Debug, PartialEq, Clone)]
+pub enum ScanError {
     #[error("Unknown token {0}")]
-    UnknownToken(&'a str),
+    UnknownToken(String),
     #[error("Unterminated string {0}")]
-    UnterminatedString(&'a str),
+    UnterminatedString(String),
 }
 
 #[cfg(test)]

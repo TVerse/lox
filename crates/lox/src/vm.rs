@@ -32,7 +32,8 @@ impl VM {
                     .disassemble_instruction_at(self.ip)
                     .unwrap_or_else(|| "Not found, crash imminent".to_string())
             );
-            let opcode = Opcode::try_from(self.read_byte(chunk)?).map_err(CompileError::from)?;
+            let opcode =
+                Opcode::try_from(self.read_byte(chunk)?).map_err(IncorrectInvariantError::from)?;
             match opcode {
                 Opcode::Constant => {
                     let constant = (*self.read_constant(chunk)?).clone();
@@ -76,7 +77,7 @@ impl VM {
         let byte = self.read_byte(chunk)?;
         let constant = chunk
             .get_constant(byte)
-            .ok_or(CompileError::InvalidConstant { index: byte })?;
+            .ok_or(IncorrectInvariantError::InvalidConstant { index: byte })?;
         Ok(constant)
     }
 
@@ -86,8 +87,10 @@ impl VM {
             .map_err(|_| RuntimeError::StackOverflow)
     }
 
-    fn pop(&mut self) -> Result<Value, CompileError> {
-        self.stack.pop().ok_or(CompileError::StackUnderflow)
+    fn pop(&mut self) -> Result<Value, IncorrectInvariantError> {
+        self.stack
+            .pop()
+            .ok_or(IncorrectInvariantError::StackUnderflow)
     }
 
     fn binary_op(&mut self, f: impl Fn(f64, f64) -> f64) -> Result<(), InterpretError> {
@@ -106,13 +109,13 @@ impl VM {
 #[derive(Error, Debug)]
 pub enum InterpretError {
     #[error("Compilation error: {0}")]
-    CompileError(#[from] CompileError),
+    IncorrectInvariantError(#[from] IncorrectInvariantError),
     #[error("Runtime error: {0}")]
     RuntimeError(#[from] RuntimeError),
 }
 
 #[derive(Error, Debug)]
-pub enum CompileError {
+pub enum IncorrectInvariantError {
     #[error("invalid opcode? {0}")]
     InvalidOpcode(#[from] TryFromPrimitiveError<Opcode>),
     #[error("invalid constant? {index}")]
