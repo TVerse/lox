@@ -272,10 +272,10 @@ impl<'a, 'b> Compiler<'a, 'b> {
     }
 }
 
-fn get_parser<'a, 'b, 'c, 'd, 'e>(
-    token: &'d Token,
+fn get_parser<'a, 'b, 'c>(
+    token: &'c Token,
     operator_type: OperatorType,
-) -> Option<(Parser<'a, 'b, 'c, 'd, 'e>, BindingPower)> {
+) -> Option<(Parser<'a, 'b, 'c>, BindingPower)> {
     match (&token.contents, operator_type) {
         (TokenContents::Minus | TokenContents::Bang, OperatorType::Prefix) => {
             Some((Compiler::parse_unary, BindingPower::Unary))
@@ -315,7 +315,7 @@ enum OperatorType {
     Infix,
 }
 
-type Parser<'a, 'b, 'c, 'd, 'e> = fn(&'e mut Compiler<'a, 'b>, &'c Token<'d>) -> CompileResult<()>;
+type Parser<'a, 'b, 'c> = fn(&'c mut Compiler<'a, 'b>, &'c Token<'b>) -> CompileResult<()>;
 
 // TODO custom Display
 #[derive(Error, Debug)]
