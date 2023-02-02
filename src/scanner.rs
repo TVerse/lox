@@ -19,7 +19,7 @@ static UPPERCASE_LETTERS: &[&str] = &[
 static UNDERSCORE: &[&str] = &["_"];
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum TokenContents {
+pub enum TokenContents<'a> {
     // One-character tokens
     LeftParen,
     RightParen,
@@ -42,9 +42,9 @@ pub enum TokenContents {
     Less,
     LessEqual,
     // Literals
-    Identifier(String),
-    String(String),
-    Number(String),
+    Identifier(&'a str),
+    String(&'a str),
+    Number(&'a str),
     // Keywords
     And,
     Class,
@@ -65,13 +65,13 @@ pub enum TokenContents {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct Token {
-    pub contents: TokenContents,
+pub struct Token<'a> {
+    pub contents: TokenContents<'a>,
     pub line: usize,
 }
 
-impl Token {
-    pub fn new(contents: TokenContents, line: usize) -> Self {
+impl<'a> Token<'a> {
+    pub fn new(contents: TokenContents<'a>, line: usize) -> Self {
         Self { contents, line }
     }
 }
@@ -193,7 +193,7 @@ impl<'a> SourceIterator<'a> {
         self.source.get(0..advance_len)
     }
 
-    fn string(&mut self) -> ScanResult<Token> {
+    fn string<'b>(&'b mut self) -> ScanResult<Token<'a>> {
         let starting_line = self.line;
         while let Some(c) = self.peek() {
             if NEWLINE_GRAPHEMES.contains(&c) {
@@ -204,7 +204,7 @@ impl<'a> SourceIterator<'a> {
                 let contents = self
                     .get_cur_str()
                     .expect("Should not find empty string, including start/end quotes");
-                let contents = TokenContents::String(contents.to_owned());
+                let contents = TokenContents::String(contents);
                 return Ok(Token::new(contents, starting_line));
             } else {
                 let _ = self.get_and_advance();
@@ -217,7 +217,7 @@ impl<'a> SourceIterator<'a> {
         ));
     }
 
-    fn digit(&mut self) -> Token {
+    fn digit<'b>(&'b mut self) -> Token<'a> {
         while let Some(c) = self.peek() {
             if is_digit(c) {
                 let _ = self.get_and_advance();
@@ -244,10 +244,10 @@ impl<'a> SourceIterator<'a> {
         }
 
         let num = self.get_cur_str().expect("Should not find empty number");
-        Token::new(TokenContents::Number(num.to_owned()), self.line)
+        Token::new(TokenContents::Number(num), self.line)
     }
 
-    fn identifier(&mut self) -> Token {
+    fn identifier<'b>(&'b mut self) -> Token<'a> {
         while let Some(c) = self.peek() {
             if is_letter_or_underscore(c) || is_digit(c) {
                 let _ = self.get_and_advance();
@@ -279,13 +279,13 @@ impl<'a> SourceIterator<'a> {
                 "true" => True,
                 "var" => Var,
                 "while" => While,
-                identifier => Identifier(identifier.to_owned()),
+                identifier => Identifier(identifier),
             },
             self.line,
         )
     }
 
-    fn match_token<'b>(&'b mut self, c: &'a str) -> Option<ScanResult<Token>> {
+    fn match_token<'b>(&'b mut self, c: &'a str) -> Option<ScanResult<Token<'a>>> {
         use TokenContents::*;
         match c {
             "(" => Some(Ok(Token::new(LeftParen, self.line))),
@@ -350,14 +350,15 @@ fn is_letter_or_underscore(c: &str) -> bool {
 }
 
 impl<'a> Iterator for SourceIterator<'a> {
-    type Item = ScanResult<Token>;
+    type Item = ScanResult<Token<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.skip_whitespace();
+        let line = self.line;
         let c = self.get_and_advance()?;
         let res = self
             .match_token(c)
-            .or_else(|| Some(Err(ScanError::UnknownToken(c.to_string(), self.line))));
+            .or_else(|| Some(Err(ScanError::UnknownToken(c.to_string(), line))));
         self.reset();
         res
     }
@@ -428,8 +429,8 @@ mod tests {
         let iter = scanner.iter();
         let res: Vec<_> = iter.map(|t| t.unwrap()).collect();
         let expected = [
-            Token::new(String("\"hi!\nsup\"".to_owned()), 2),
-            Token::new(String("\"how are you?\"".to_owned()), 4),
+            Token::new(String("\"hi!\nsup\""), 2),
+            Token::new(String("\"how are you?\""), 4),
         ];
         assert_eq!(&res, &expected);
     }
@@ -441,8 +442,8 @@ mod tests {
         let iter = scanner.iter();
         let res: Vec<_> = iter.collect();
         let expected = [
-            Ok(Token::new(Number("0.123456789".to_owned()), 1)),
-            Ok(Token::new(Number("14482.148210".to_owned()), 2)),
+            Ok(Token::new(Number("0.123456789"), 1)),
+            Ok(Token::new(Number("14482.148210"), 2)),
             Err(ScanError::UnknownToken(":".to_owned(), 2)),
         ];
         assert_eq!(&res, &expected);
@@ -455,9 +456,9 @@ mod tests {
         let iter = scanner.iter();
         let res: Vec<_> = iter.collect();
         let expected = [
-            Ok(Token::new(Identifier("a".to_owned()), 1)),
-            Ok(Token::new(Identifier("Beta".to_owned()), 1)),
-            Ok(Token::new(Identifier("_c".to_owned()), 1)),
+            Ok(Token::new(Identifier("a"), 1)),
+            Ok(Token::new(Identifier("Beta"), 1)),
+            Ok(Token::new(Identifier("_c"), 1)),
             Ok(Token::new(Class, 1)),
         ];
         assert_eq!(&res, &expected)
