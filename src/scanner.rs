@@ -1,4 +1,3 @@
-use std::fmt::Display;
 use std::iter::FusedIterator;
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
@@ -54,6 +53,7 @@ pub enum TokenContents {
     For,
     Fun,
     If,
+    Nil,
     Or,
     Print,
     Return,
@@ -270,6 +270,7 @@ impl<'a> SourceIterator<'a> {
                 "for" => For,
                 "fun" => Fun,
                 "if" => If,
+                "nil" => Nil,
                 "or" => Or,
                 "print" => Print,
                 "return" => Return,
@@ -442,7 +443,7 @@ mod tests {
         let expected = [
             Ok(Token::new(Number("0.123456789".to_owned()), 1)),
             Ok(Token::new(Number("14482.148210".to_owned()), 2)),
-            Err(ScanError::UnknownToken(":".to_owned())),
+            Err(ScanError::UnknownToken(":".to_owned(), 2)),
         ];
         assert_eq!(&res, &expected);
     }

@@ -36,17 +36,20 @@ fn repl() -> Result<()> {
         if line.is_empty() {
             break;
         }
-        match interpret(&line) {
+        match interpret(&line, &mut std::io::stdout()) {
             Ok(_) => {}
             Err(e) => error!("Error: {e}"),
         }
+        let mut stdout = std::io::stdout();
+        write!(stdout, ">")?;
+        stdout.flush()?;
     }
     Ok(())
 }
 
 fn run_file(path: &PathBuf) -> Result<()> {
     let contents = std::fs::read_to_string(path)?;
-    interpret(&contents)?;
+    interpret(&contents, &mut std::io::stdout())?;
     Ok(())
 }
 

@@ -1,27 +1,32 @@
 use crate::chunk::{Chunk, Opcode};
 use crate::value::Value;
 use arrayvec::ArrayVec;
-use log::trace;
+use log::{error, trace};
 use num_enum::TryFromPrimitiveError;
+use std::io::Write;
 use thiserror::Error;
+
+type VMResult<A> = Result<A, InterpretError>;
 
 const STACK_SIZE: usize = 256;
 
-pub struct VM {
+pub struct VM<'a, W: Write> {
+    write: &'a mut W,
     ip: usize,
     // could this be a list of refs? Runs into lifetime issues!
     stack: ArrayVec<Value, STACK_SIZE>,
 }
 
-impl VM {
-    pub fn new() -> Self {
+impl<'a, W: Write> VM<'a, W> {
+    pub fn new(write: &'a mut W) -> Self {
         Self {
+            write,
             ip: 0,
             stack: ArrayVec::new(),
         }
     }
 
-    pub fn run(&mut self, chunk: &Chunk) -> Result<(), InterpretError> {
+    pub fn run(&mut self, chunk: &Chunk) -> VMResult<()> {
         // TODO some kind of iterator?
         loop {
             trace!("Stack:\n{stack:?}", stack = self.stack);
@@ -41,27 +46,44 @@ impl VM {
                 }
                 Opcode::Return => {
                     let val = self.pop()?;
-                    println!("{}", val);
+                    if let Err(e) = writeln!(self.write, "{}", val) {
+                        error!("Error writing output value: {e}")
+                    }
                     break;
                 }
                 Opcode::Negate => {
                     let value = self.pop()?;
-                    let new_value = match value {
+                    let value = match value {
                         Value::Number(num) => Value::Number(-num),
+                        _ => return Err(RuntimeError::InvalidTypes.into()),
                     };
-                    self.push(new_value)?;
+                    self.push(value)?;
                 }
-                Opcode::Add => self.binary_op(|a, b| a + b)?,
-                Opcode::Subtract => self.binary_op(|a, b| a - b)?,
-                Opcode::Multiply => self.binary_op(|a, b| a * b)?,
-                Opcode::Divide => self.binary_op(|a, b| a / b)?,
+                Opcode::Add => self.binary_op_num(|a, b| a + b)?,
+                Opcode::Subtract => self.binary_op_num(|a, b| a - b)?,
+                Opcode::Multiply => self.binary_op_num(|a, b| a * b)?,
+                Opcode::Divide => self.binary_op_num(|a, b| a / b)?,
+                Opcode::True => self.push(Value::Boolean(true))?,
+                Opcode::False => self.push(Value::Boolean(false))?,
+                Opcode::Nil => self.push(Value::Nil)?,
+                Opcode::Not => {
+                    let value = self.pop()?;
+                    self.push(Value::Boolean(value.is_falsey()))?
+                }
+                Opcode::Equal => {
+                    let b = self.pop()?;
+                    let a = self.pop()?;
+                    self.push(Value::Boolean(a == b))?
+                }
+                Opcode::Greater => self.binary_op_bool(|a, b| a > b)?,
+                Opcode::Less => self.binary_op_bool(|a, b| a < b)?,
             }
         }
 
         Ok(())
     }
 
-    fn read_byte(&mut self, chunk: &Chunk) -> Result<u8, InterpretError> {
+    fn read_byte(&mut self, chunk: &Chunk) -> VMResult<u8> {
         let byte = chunk
             .get(self.ip)
             .copied()
@@ -73,7 +95,7 @@ impl VM {
         Ok(byte)
     }
 
-    fn read_constant<'a, 'b>(&'a mut self, chunk: &'b Chunk) -> Result<&'b Value, InterpretError> {
+    fn read_constant<'b, 'c>(&'b mut self, chunk: &'c Chunk) -> VMResult<&'c Value> {
         let byte = self.read_byte(chunk)?;
         let constant = chunk
             .get_constant(byte)
@@ -81,28 +103,46 @@ impl VM {
         Ok(constant)
     }
 
-    fn push(&mut self, value: Value) -> Result<(), RuntimeError> {
+    fn push(&mut self, value: Value) -> VMResult<()> {
         self.stack
             .try_push(value)
-            .map_err(|_| RuntimeError::StackOverflow)
+            .map_err(|_| RuntimeError::StackOverflow.into())
     }
 
-    fn pop(&mut self) -> Result<Value, IncorrectInvariantError> {
+    fn pop(&mut self) -> VMResult<Value> {
         self.stack
             .pop()
-            .ok_or(IncorrectInvariantError::StackUnderflow)
+            .ok_or_else(|| IncorrectInvariantError::StackUnderflow.into())
     }
 
-    fn binary_op(&mut self, f: impl Fn(f64, f64) -> f64) -> Result<(), InterpretError> {
+    fn binary_op_num(&mut self, f: impl Fn(f64, f64) -> f64) -> VMResult<()> {
         let b = self.pop()?;
         let a = self.pop()?;
 
         let res = match (a, b) {
             (Value::Number(a), Value::Number(b)) => Value::Number(f(a, b)),
-            // (_, _) => return Err(InterpretError::RuntimeError(RuntimeError::InvalidTypes))
+            (_, _) => return Err(InterpretError::RuntimeError(RuntimeError::InvalidTypes)),
         };
         self.push(res)?;
         Ok(())
+    }
+
+    fn binary_op_bool(&mut self, f: impl Fn(f64, f64) -> bool) -> VMResult<()> {
+        let b = self.pop()?;
+        let a = self.pop()?;
+
+        let res = match (a, b) {
+            (Value::Number(a), Value::Number(b)) => Value::Boolean(f(a, b)),
+            (_, _) => return Err(InterpretError::RuntimeError(RuntimeError::InvalidTypes)),
+        };
+        self.push(res)?;
+        Ok(())
+    }
+
+    fn peek(&self, distance: usize) -> VMResult<&Value> {
+        self.stack
+            .get(self.stack.len() - distance)
+            .ok_or_else(|| IncorrectInvariantError::StackUnderflow.into())
     }
 }
 

@@ -132,6 +132,7 @@ impl<'a> Compiler<'a> {
         self.compile_bp(BindingPower::Unary)?;
         match token.contents {
             TokenContents::Minus => self.chunk.add_opcode(Opcode::Negate, token.line),
+            TokenContents::Bang => self.chunk.add_opcode(Opcode::Not, token.line),
             _ => {
                 return Err(CompileError::GeneralError(format!(
                     "Unexpected unary token, got {token:?}"
@@ -185,7 +186,7 @@ impl<'a> Compiler<'a> {
                 return Err(CompileError::GeneralError(format!(
                     "Unexpected term token, got {token:?}"
                 ))
-                .into());
+                .into())
             }
         }
         Ok(())
@@ -211,6 +212,62 @@ impl<'a> Compiler<'a> {
         }
         Ok(())
     }
+
+    fn parse_literal(&mut self, token: &Token) -> CompileResult<()> {
+        match token.contents {
+            TokenContents::True => self.chunk.add_opcode(Opcode::True, token.line),
+            TokenContents::False => self.chunk.add_opcode(Opcode::False, token.line),
+            TokenContents::Nil => self.chunk.add_opcode(Opcode::Nil, token.line),
+            _ => {
+                return Err(CompileError::GeneralError(format!(
+                    "Unexpected term token, got {token:?}"
+                ))
+                .into())
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_equality(&mut self, token: &Token) -> CompileResult<()> {
+        self.compile_bp(BindingPower::Equality)?;
+        match token.contents {
+            TokenContents::EqualEqual => self.chunk.add_opcode(Opcode::Equal, token.line),
+            TokenContents::BangEqual => {
+                self.chunk.add_opcode(Opcode::Equal, token.line);
+                self.chunk.add_opcode(Opcode::Not, token.line);
+            }
+            _ => {
+                return Err(CompileError::GeneralError(format!(
+                    "Unexpected equality token, got {token:?}"
+                ))
+                .into())
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_comparison(&mut self, token: &Token) -> CompileResult<()> {
+        self.compile_bp(BindingPower::Comparison)?;
+        match token.contents {
+            TokenContents::Greater => self.chunk.add_opcode(Opcode::Greater, token.line),
+            TokenContents::GreaterEqual => {
+                self.chunk.add_opcode(Opcode::Less, token.line);
+                self.chunk.add_opcode(Opcode::Not, token.line);
+            }
+            TokenContents::Less => self.chunk.add_opcode(Opcode::Less, token.line),
+            TokenContents::LessEqual => {
+                self.chunk.add_opcode(Opcode::Greater, token.line);
+                self.chunk.add_opcode(Opcode::Not, token.line);
+            }
+            _ => {
+                return Err(CompileError::GeneralError(format!(
+                    "Unexpected equality token, got {token:?}"
+                ))
+                .into())
+            }
+        }
+        Ok(())
+    }
 }
 
 fn get_parser<'a, 'b>(
@@ -218,7 +275,7 @@ fn get_parser<'a, 'b>(
     operator_type: OperatorType,
 ) -> Option<(Parser<'a, 'b>, BindingPower)> {
     match (&token.contents, operator_type) {
-        (TokenContents::Minus, OperatorType::Prefix) => {
+        (TokenContents::Minus | TokenContents::Bang, OperatorType::Prefix) => {
             Some((Compiler::parse_unary, BindingPower::Unary))
         }
         (TokenContents::Number(_), OperatorType::Prefix) => {
@@ -233,6 +290,19 @@ fn get_parser<'a, 'b>(
         (TokenContents::LeftParen, OperatorType::Prefix) => {
             Some((Compiler::parse_grouping, BindingPower::None))
         }
+        (TokenContents::True | TokenContents::False | TokenContents::Nil, OperatorType::Prefix) => {
+            Some((Compiler::parse_literal, BindingPower::None))
+        }
+        (TokenContents::EqualEqual | TokenContents::BangEqual, OperatorType::Infix) => {
+            Some((Compiler::parse_equality, BindingPower::Equality))
+        }
+        (
+            TokenContents::Greater
+            | TokenContents::GreaterEqual
+            | TokenContents::Less
+            | TokenContents::LessEqual,
+            OperatorType::Infix,
+        ) => Some((Compiler::parse_comparison, BindingPower::Comparison)),
         _ => None,
     }
 }
@@ -277,10 +347,6 @@ impl CompileErrors {
         self.errors.push(e)
     }
 
-    pub fn errors(&self) -> &[CompileError] {
-        &self.errors
-    }
-
     fn extend(&mut self, other: CompileErrors) {
         self.errors.extend(other.errors.into_iter())
     }
@@ -298,8 +364,6 @@ impl From<CompileError> for CompileErrors {
 pub enum CompileError {
     #[error(transparent)]
     ScanError(#[from] ScanError),
-    #[error("Unimplemented token")]
-    TokenNotImplemented(String),
     #[error("Too many constants")]
     TooManyConstants,
     #[error("Compile error: {0}")]

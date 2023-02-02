@@ -14,6 +14,13 @@ pub enum Opcode {
     Divide,
     Negate,
     Return,
+    True,
+    False,
+    Nil,
+    Not,
+    Equal,
+    Greater,
+    Less,
 }
 
 impl Opcode {
@@ -118,7 +125,14 @@ impl Chunk {
                     | Opcode::Add
                     | Opcode::Subtract
                     | Opcode::Multiply
-                    | Opcode::Divide => simple_instruction(opcode),
+                    | Opcode::Divide
+                    | Opcode::True
+                    | Opcode::False
+                    | Opcode::Nil
+                    | Opcode::Not
+                    | Opcode::Equal
+                    | Opcode::Greater
+                    | Opcode::Less => simple_instruction(opcode),
                     Opcode::Constant => self.constant_instruction(opcode, iter.next().map(code)),
                 }
             } else {
