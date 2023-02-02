@@ -19,11 +19,7 @@ impl PartialEq for Value {
 
 impl Value {
     pub fn is_falsey(&self) -> bool {
-        match self {
-            Value::Boolean(false) => true,
-            Value::Nil => true,
-            _ => false,
-        }
+        matches!(self, Value::Boolean(false) | Value::Nil)
     }
 }
 

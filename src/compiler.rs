@@ -43,7 +43,9 @@ impl BindingPower {
     }
 }
 
-pub fn compile(iter: &mut impl Iterator<Item = ScanResult<Token>>) -> CompileResult<Chunk> {
+pub fn compile<'a, 'b>(
+    iter: &'b mut impl Iterator<Item = ScanResult<Token<'a>>>,
+) -> CompileResult<Chunk> {
     let chunk = Chunk::new("main".to_string());
     let mut compiler = Compiler::new(iter, chunk);
     compiler.compile()?;
@@ -56,14 +58,14 @@ pub fn compile(iter: &mut impl Iterator<Item = ScanResult<Token>>) -> CompileRes
     Ok(chunk)
 }
 
-struct Compiler<'a> {
-    iter: Peekable<&'a mut dyn Iterator<Item = ScanResult<Token>>>,
+struct Compiler<'a, 'b> {
+    iter: Peekable<&'b mut dyn Iterator<Item = ScanResult<Token<'a>>>>,
     chunk: Chunk,
 }
 
-impl<'a> Compiler<'a> {
-    fn new(iter: &'a mut impl Iterator<Item = ScanResult<Token>>, chunk: Chunk) -> Self {
-        let iter: &mut dyn Iterator<Item = ScanResult<Token>> = iter;
+impl<'a, 'b> Compiler<'a, 'b> {
+    fn new(iter: &'b mut impl Iterator<Item = ScanResult<Token<'a>>>, chunk: Chunk) -> Self {
+        let iter: &mut dyn Iterator<Item = ScanResult<Token<'a>>> = iter;
         Self {
             iter: iter.peekable(),
             chunk,
@@ -270,10 +272,10 @@ impl<'a> Compiler<'a> {
     }
 }
 
-fn get_parser<'a, 'b>(
-    token: &'b Token,
+fn get_parser<'a, 'b, 'c>(
+    token: &'c Token,
     operator_type: OperatorType,
-) -> Option<(Parser<'a, 'b>, BindingPower)> {
+) -> Option<(Parser<'a, 'b, 'c>, BindingPower)> {
     match (&token.contents, operator_type) {
         (TokenContents::Minus | TokenContents::Bang, OperatorType::Prefix) => {
             Some((Compiler::parse_unary, BindingPower::Unary))
@@ -313,7 +315,7 @@ enum OperatorType {
     Infix,
 }
 
-type Parser<'a, 'b> = fn(&'b mut Compiler<'a>, &'b Token) -> CompileResult<()>;
+type Parser<'a, 'b, 'c> = fn(&'c mut Compiler<'a, 'b>, &'c Token<'b>) -> CompileResult<()>;
 
 // TODO custom Display
 #[derive(Error, Debug)]
