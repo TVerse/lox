@@ -1,4 +1,6 @@
 use crate::chunk::{Chunk, Opcode};
+use crate::heap::MemoryManager;
+use crate::heap::Object;
 use crate::scanner::{ScanError, ScanResult, Token, TokenContents};
 use crate::value::Value;
 use log::trace;
@@ -45,9 +47,10 @@ impl BindingPower {
 
 pub fn compile<'a, 'b>(
     iter: &'b mut impl Iterator<Item = ScanResult<Token<'a>>>,
+    mm: &'b mut MemoryManager,
 ) -> CompileResult<Chunk> {
     let chunk = Chunk::new("main".to_string());
-    let mut compiler = Compiler::new(iter, chunk);
+    let mut compiler = Compiler::new(iter, chunk, mm);
     compiler.compile()?;
     let Compiler { mut chunk, .. } = compiler;
 
@@ -61,14 +64,20 @@ pub fn compile<'a, 'b>(
 struct Compiler<'a, 'b> {
     iter: Peekable<&'b mut dyn Iterator<Item = ScanResult<Token<'a>>>>,
     chunk: Chunk,
+    mm: &'b mut MemoryManager,
 }
 
 impl<'a, 'b> Compiler<'a, 'b> {
-    fn new(iter: &'b mut impl Iterator<Item = ScanResult<Token<'a>>>, chunk: Chunk) -> Self {
+    fn new(
+        iter: &'b mut impl Iterator<Item = ScanResult<Token<'a>>>,
+        chunk: Chunk,
+        mm: &'b mut MemoryManager,
+    ) -> Self {
         let iter: &mut dyn Iterator<Item = ScanResult<Token<'a>>> = iter;
         Self {
             iter: iter.peekable(),
             chunk,
+            mm,
         }
     }
 
@@ -270,6 +279,27 @@ impl<'a, 'b> Compiler<'a, 'b> {
         }
         Ok(())
     }
+
+    fn parse_string(&mut self, token: &Token) -> CompileResult<()> {
+        match token.contents {
+            TokenContents::String(s) => {
+                let value = Value::Obj(Object::new_str(s, self.mm) as *mut _);
+                let constant = self
+                    .chunk
+                    .add_constant(value)
+                    .ok_or(CompileError::TooManyConstants)?;
+                self.chunk
+                    .add_opcode_and_operand(Opcode::Constant, constant, token.line)
+            }
+            _ => {
+                return Err(CompileError::GeneralError(format!(
+                    "Unexpected string token, got {token:?}"
+                ))
+                .into())
+            }
+        }
+        Ok(())
+    }
 }
 
 fn get_parser<'a, 'b, 'c>(
@@ -305,6 +335,9 @@ fn get_parser<'a, 'b, 'c>(
             | TokenContents::LessEqual,
             OperatorType::Infix,
         ) => Some((Compiler::parse_comparison, BindingPower::Comparison)),
+        (TokenContents::String(_), OperatorType::Prefix) => {
+            Some((Compiler::parse_string, BindingPower::None))
+        }
         _ => None,
     }
 }

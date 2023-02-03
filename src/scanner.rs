@@ -204,7 +204,7 @@ impl<'a> SourceIterator<'a> {
                 let contents = self
                     .get_cur_str()
                     .expect("Should not find empty string, including start/end quotes");
-                let contents = TokenContents::String(contents);
+                let contents = TokenContents::String(&contents[1..(contents.len() - 1)]);
                 return Ok(Token::new(contents, starting_line));
             } else {
                 let _ = self.get_and_advance();
@@ -429,8 +429,8 @@ mod tests {
         let iter = scanner.iter();
         let res: Vec<_> = iter.map(|t| t.unwrap()).collect();
         let expected = [
-            Token::new(String("\"hi!\nsup\""), 2),
-            Token::new(String("\"how are you?\""), 4),
+            Token::new(String("hi!\nsup"), 2),
+            Token::new(String("how are you?"), 4),
         ];
         assert_eq!(&res, &expected);
     }

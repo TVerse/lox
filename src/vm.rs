@@ -1,4 +1,5 @@
 use crate::chunk::{Chunk, Opcode};
+use crate::heap::{MemoryManager, Object};
 use crate::value::Value;
 use arrayvec::ArrayVec;
 use log::{error, trace};
@@ -15,14 +16,16 @@ pub struct VM<'a, W: Write> {
     ip: usize,
     // could this be a list of refs? Runs into lifetime issues!
     stack: ArrayVec<Value, STACK_SIZE>,
+    mm: &'a mut MemoryManager,
 }
 
 impl<'a, W: Write> VM<'a, W> {
-    pub fn new(write: &'a mut W) -> Self {
+    pub fn new(write: &'a mut W, mm: &'a mut MemoryManager) -> Self {
         Self {
             write,
             ip: 0,
             stack: ArrayVec::new(),
+            mm,
         }
     }
 
@@ -59,10 +62,25 @@ impl<'a, W: Write> VM<'a, W> {
                     };
                     self.push(value)?;
                 }
-                Opcode::Add => self.binary_op_num(|a, b| a + b)?,
-                Opcode::Subtract => self.binary_op_num(|a, b| a - b)?,
-                Opcode::Multiply => self.binary_op_num(|a, b| a * b)?,
-                Opcode::Divide => self.binary_op_num(|a, b| a / b)?,
+                Opcode::Add => {
+                    match (self.peek(0)?, self.peek(1)?) {
+                        (Value::Number(_), Value::Number(_)) => {
+                            self.binary_op(|a, b| a + b, Value::Number)?
+                        }
+                        (Value::Obj(ptra), Value::Obj(ptrb)) => unsafe {
+                            let a = &**ptra;
+                            let b = &**ptrb;
+                            match (a.as_str(), b.as_str()) {
+                                (Some(_), Some(_)) => self.concatenate()?,
+                                _ => return Err(RuntimeError::InvalidTypes.into()),
+                            }
+                        },
+                        _ => return Err(RuntimeError::InvalidTypes.into()),
+                    };
+                }
+                Opcode::Subtract => self.binary_op(|a, b| a - b, Value::Number)?,
+                Opcode::Multiply => self.binary_op(|a, b| a * b, Value::Number)?,
+                Opcode::Divide => self.binary_op(|a, b| a / b, Value::Number)?,
                 Opcode::True => self.push(Value::Boolean(true))?,
                 Opcode::False => self.push(Value::Boolean(false))?,
                 Opcode::Nil => self.push(Value::Nil)?,
@@ -75,8 +93,8 @@ impl<'a, W: Write> VM<'a, W> {
                     let a = self.pop()?;
                     self.push(Value::Boolean(a == b))?
                 }
-                Opcode::Greater => self.binary_op_bool(|a, b| a > b)?,
-                Opcode::Less => self.binary_op_bool(|a, b| a < b)?,
+                Opcode::Greater => self.binary_op(|a, b| a > b, Value::Boolean)?,
+                Opcode::Less => self.binary_op(|a, b| a < b, Value::Boolean)?,
             }
         }
 
@@ -115,24 +133,12 @@ impl<'a, W: Write> VM<'a, W> {
             .ok_or_else(|| IncorrectInvariantError::StackUnderflow.into())
     }
 
-    fn binary_op_num(&mut self, f: impl Fn(f64, f64) -> f64) -> VMResult<()> {
+    fn binary_op<T>(&mut self, f: impl Fn(f64, f64) -> T, v: fn(T) -> Value) -> VMResult<()> {
         let b = self.pop()?;
         let a = self.pop()?;
 
         let res = match (a, b) {
-            (Value::Number(a), Value::Number(b)) => Value::Number(f(a, b)),
-            (_, _) => return Err(InterpretError::RuntimeError(RuntimeError::InvalidTypes)),
-        };
-        self.push(res)?;
-        Ok(())
-    }
-
-    fn binary_op_bool(&mut self, f: impl Fn(f64, f64) -> bool) -> VMResult<()> {
-        let b = self.pop()?;
-        let a = self.pop()?;
-
-        let res = match (a, b) {
-            (Value::Number(a), Value::Number(b)) => Value::Boolean(f(a, b)),
+            (Value::Number(a), Value::Number(b)) => v(f(a, b)),
             (_, _) => return Err(InterpretError::RuntimeError(RuntimeError::InvalidTypes)),
         };
         self.push(res)?;
@@ -141,8 +147,26 @@ impl<'a, W: Write> VM<'a, W> {
 
     fn peek(&self, distance: usize) -> VMResult<&Value> {
         self.stack
-            .get(self.stack.len() - distance)
+            .get(self.stack.len() - distance - 1)
             .ok_or_else(|| IncorrectInvariantError::StackUnderflow.into())
+    }
+
+    fn concatenate(&mut self) -> VMResult<()> {
+        let b = self.pop()?;
+        let a = self.pop()?;
+        let (a, b) = match (a, b) {
+            (Value::Obj(a), Value::Obj(b)) => unsafe {
+                let a = &*a;
+                let b = &*b;
+                match (a.as_str(), b.as_str()) {
+                    (Some(a), Some(b)) => (a, b),
+                    _ => unreachable!(),
+                }
+            },
+            _ => unreachable!(),
+        };
+        let value = Value::Obj(Object::new_str_concat(a, b, self.mm));
+        self.push(value)
     }
 }
 
