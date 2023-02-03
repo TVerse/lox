@@ -1,7 +1,6 @@
 use log::trace;
 use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 use std::fmt::{Display, Formatter};
-use std::path::Component::Prefix;
 use std::{ptr, slice};
 
 pub struct MemoryManager {
