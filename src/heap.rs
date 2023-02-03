@@ -113,6 +113,7 @@ impl Display for Object {
 
 pub struct ObjString {
     len: usize,
+    hash: u32,
     ptr: *const u8,
 }
 
@@ -125,9 +126,15 @@ impl ObjString {
             str_ptr as *const _
         };
 
+        let hash = Self::make_hash(str_ptr, len);
+
         unsafe {
             let self_ptr = Self::new(mm);
-            self_ptr.write(Self { len, ptr: str_ptr });
+            self_ptr.write(Self {
+                len,
+                hash,
+                ptr: str_ptr,
+            });
             self_ptr
         }
     }
@@ -141,6 +148,19 @@ impl ObjString {
             let slice = slice::from_raw_parts(self.ptr, self.len);
             std::str::from_utf8_unchecked(slice)
         }
+    }
+
+    pub fn hash(&self) -> u32 {
+        self.hash
+    }
+
+    fn make_hash(chars: *const u8, len: usize) -> u32 {
+        let mut hash = 2166136261;
+        for i in 0..len {
+            hash ^= unsafe { *chars.add(i) } as u32;
+            hash = hash.wrapping_mul(16777619);
+        }
+        hash
     }
 
     unsafe fn free(ptr: *const Self, mm: &mut MemoryManager) {
@@ -158,9 +178,14 @@ impl ObjString {
             ptr::copy(b.ptr, str_ptr.add(a.len), b.len);
             str_ptr
         };
+        let hash = Self::make_hash(str_ptr, len);
         unsafe {
             let self_ptr = Self::new(mm);
-            self_ptr.write(Self { len, ptr: str_ptr });
+            self_ptr.write(Self {
+                len,
+                hash,
+                ptr: str_ptr,
+            });
             self_ptr
         }
     }

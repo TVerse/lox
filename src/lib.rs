@@ -1,4 +1,5 @@
 use crate::compiler::compile;
+use crate::hash_table::HashTable;
 use crate::heap::MemoryManager;
 use crate::scanner::Scanner;
 use crate::vm::VM;
@@ -8,6 +9,7 @@ use std::io::Write;
 
 mod chunk;
 mod compiler;
+mod hash_table;
 mod heap;
 mod scanner;
 mod value;

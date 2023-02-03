@@ -1,4 +1,5 @@
 use crate::chunk::{Chunk, Opcode};
+use crate::hash_table::HashTable;
 use crate::heap::{MemoryManager, Object};
 use crate::value::Value;
 use arrayvec::ArrayVec;

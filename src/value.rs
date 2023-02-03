@@ -19,6 +19,7 @@ impl PartialEq for Value {
                 let b = &**ptrb;
                 a == b
             },
+            (Value::Nil, Value::Nil) => true,
             _ => false,
         }
     }
