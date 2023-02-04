@@ -125,9 +125,9 @@ impl<'a, W: Write> VM<'a, W> {
                                 if let Some(v) = self.globals.get(s) {
                                     self.push(*v)?;
                                 } else {
-                                    return Err(RuntimeError::UndefinedVariable(Object::to_string(
-                                        s as *const Object,
-                                    ))
+                                    return Err(RuntimeError::UndefinedVariable(
+                                        Object::to_string(s as *const Object),
+                                    )
                                     .into());
                                 }
                             } else {

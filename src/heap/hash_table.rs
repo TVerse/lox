@@ -241,13 +241,9 @@ mod tests {
             .collect();
 
         for (k, v) in kvs.iter() {
-            assert!(table.insert(*k, *v), "{k:?}, {}, {v}", unsafe {
-                &**k
-            });
+            assert!(table.insert(*k, *v), "{k:?}, {}, {v}", unsafe { &**k });
             assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {}, {v}", unsafe { &**k });
-            assert!(!table.insert(*k, *v), "{k:?}, {}, {v}", unsafe {
-                &**k
-            });
+            assert!(!table.insert(*k, *v), "{k:?}, {}, {v}", unsafe { &**k });
         }
         for (k, v) in kvs.iter() {
             assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {}, {v}", unsafe { &**k });
@@ -287,13 +283,9 @@ mod tests {
             .collect();
 
         for (k, v) in kvs.iter() {
-            assert!(table.insert(*k, *v), "{k:?}, {}, {v}", unsafe {
-                &**k
-            });
+            assert!(table.insert(*k, *v), "{k:?}, {}, {v}", unsafe { &**k });
             assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {}, {v}", unsafe { &**k });
-            assert!(!table.insert(*k, *v), "{k:?}, {}, {v}", unsafe {
-                &**k
-            });
+            assert!(!table.insert(*k, *v), "{k:?}, {}, {v}", unsafe { &**k });
             assert!(table.delete(*k));
             assert_eq!(table.get(*k), None, "{k:?}, {}, {v}", unsafe { &**k });
         }

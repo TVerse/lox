@@ -165,9 +165,9 @@ impl<'a, 'b> Compiler<'a, 'b> {
                     match token.contents {
                         TokenContents::Identifier(id) => self.identifier_constant(id),
                         _ => {
-                            errors.push(CompileError::GeneralError(
-                                format!("Expected identifier after 'var' on line {line}")
-                            ));
+                            errors.push(CompileError::GeneralError(format!(
+                                "Expected identifier after 'var' on line {line}"
+                            )));
                             Err(errors)
                         }
                     }
@@ -189,12 +189,11 @@ impl<'a, 'b> Compiler<'a, 'b> {
     fn identifier_constant(&mut self, id: &str) -> CompileResult<u8> {
         self.chunk
             .add_constant(Value::Obj(self.heap_manager.create_string_copied(id)))
-            .ok_or_else(||CompileErrors::from(CompileError::TooManyConstants))
+            .ok_or_else(|| CompileErrors::from(CompileError::TooManyConstants))
     }
 
     fn define_variable(&mut self, idx: u8, line: usize) -> CompileResult<()> {
-        self
-            .chunk
+        self.chunk
             .add_opcode_and_operand(Opcode::DefineGlobal, idx, line);
         Ok(())
     }
@@ -338,7 +337,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         let constant = self
             .chunk
             .add_constant(Value::Number(number))
-            .ok_or_else(||CompileErrors::from(CompileError::TooManyConstants))?;
+            .ok_or_else(|| CompileErrors::from(CompileError::TooManyConstants))?;
         self.chunk
             .add_opcode_and_operand(Opcode::Constant, constant, token.line);
         Ok(())
@@ -458,7 +457,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 let constant = self
                     .chunk
                     .add_constant(value)
-                    .ok_or_else(||CompileErrors::from(CompileError::TooManyConstants))?;
+                    .ok_or_else(|| CompileErrors::from(CompileError::TooManyConstants))?;
                 self.chunk
                     .add_opcode_and_operand(Opcode::Constant, constant, token.line)
             }
