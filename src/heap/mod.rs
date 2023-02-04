@@ -220,7 +220,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn double_insert_string() {
+    fn string_interning() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
         let heap_manager = HeapManager::new(alloc, strings);
