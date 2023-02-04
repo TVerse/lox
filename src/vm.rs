@@ -6,7 +6,9 @@ use arrayvec::ArrayVec;
 use log::{error, trace};
 use num_enum::TryFromPrimitiveError;
 use std::io::Write;
+use std::sync::Arc;
 use thiserror::Error;
+use crate::heap::allocator::Allocator;
 
 type VMResult<A> = Result<A, InterpretError>;
 
@@ -17,16 +19,16 @@ pub struct VM<'a, W: Write> {
     ip: usize,
     // could this be a list of refs? Runs into lifetime issues!
     stack: ArrayVec<Value, STACK_SIZE>,
-    mm: &'a mut MemoryManager,
+    alloc: Arc<Allocator>,
 }
 
 impl<'a, W: Write> VM<'a, W> {
-    pub fn new(write: &'a mut W, mm: &'a mut MemoryManager) -> Self {
+    pub fn new(write: &'a mut W, alloc: &'a mut MemoryManager) -> Self {
         Self {
             write,
             ip: 0,
             stack: ArrayVec::new(),
-            mm,
+            alloc,
         }
     }
 
@@ -39,7 +41,7 @@ impl<'a, W: Write> VM<'a, W> {
                 ip = self.ip,
                 instruction = chunk
                     .disassemble_instruction_at(self.ip)
-                    .unwrap_or_else(|| "Not found, crash imminent".to_string())
+                    .unwrap_or_else(|| "Not found, crash iallocinent".to_string())
             );
             let opcode =
                 Opcode::try_from(self.read_byte(chunk)?).map_err(IncorrectInvariantError::from)?;
@@ -166,7 +168,7 @@ impl<'a, W: Write> VM<'a, W> {
             },
             _ => unreachable!(),
         };
-        let value = Value::Obj(Object::new_str_concat(a, b, self.mm));
+        let value = Value::Obj(Object::new_str_concat(a, b, self.alloc));
         self.push(value)
     }
 }
