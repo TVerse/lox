@@ -21,6 +21,8 @@ pub enum Opcode {
     Equal,
     Greater,
     Less,
+    Print,
+    Pop,
 }
 
 impl Opcode {
@@ -67,7 +69,7 @@ impl Chunk {
                 .constants
                 .iter()
                 .enumerate()
-                .find(|(idx, c)| *c == &value)
+                .find(|(_, c)| *c == &value)
                 .map(|(idx, _)| idx);
             if let Some(idx) = existing_index {
                 Some(idx as u8)
@@ -143,7 +145,9 @@ impl Chunk {
                     | Opcode::Not
                     | Opcode::Equal
                     | Opcode::Greater
-                    | Opcode::Less => simple_instruction(opcode),
+                    | Opcode::Less
+                    | Opcode::Print
+                    | Opcode::Pop => simple_instruction(opcode),
                     Opcode::Constant => self.constant_instruction(opcode, iter.next().map(code)),
                 }
             } else {

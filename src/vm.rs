@@ -47,13 +47,7 @@ impl<'a, W: Write> VM<'a, W> {
                     let constant = (*self.read_constant(chunk)?).clone();
                     self.push(constant)?;
                 }
-                Opcode::Return => {
-                    let val = self.pop()?;
-                    if let Err(e) = writeln!(self.write, "{}", val) {
-                        error!("Error writing output value: {e}")
-                    }
-                    break;
-                }
+                Opcode::Return => break,
                 Opcode::Negate => {
                     let value = self.pop()?;
                     let value = match value {
@@ -96,9 +90,23 @@ impl<'a, W: Write> VM<'a, W> {
                 }
                 Opcode::Greater => self.binary_op(|a, b| a > b, Value::Boolean)?,
                 Opcode::Less => self.binary_op(|a, b| a < b, Value::Boolean)?,
+                Opcode::Print => {
+                    let value = self.pop()?;
+                    self.print_value(value)?;
+                }
+                Opcode::Pop => {
+                    let _ = self.pop()?;
+                }
             }
         }
 
+        Ok(())
+    }
+
+    fn print_value(&mut self, value: Value) -> VMResult<()> {
+        if let Err(e) = writeln!(self.write, "{}", value) {
+            error!("Error writing output value: {e}")
+        }
         Ok(())
     }
 

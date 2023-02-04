@@ -81,10 +81,75 @@ impl<'a, 'b> Compiler<'a, 'b> {
     }
 
     fn compile(&mut self) -> CompileResult<()> {
-        self.compile_bp(BindingPower::None)
+        while self.iter.peek().is_some() {
+            self.declaration()?;
+        }
+
+        Ok(())
     }
 
-    fn compile_bp(&mut self, min_bp: BindingPower) -> CompileResult<()> {
+    fn declaration(&mut self) -> CompileResult<()> {
+        self.statement()
+    }
+
+    fn statement(&mut self) -> CompileResult<()> {
+        let mut errors = CompileErrors::new();
+        let token = self.iter.peek().unwrap();
+        match token {
+            Ok(token) => {
+                let line = token.line;
+                match token.contents {
+                    TokenContents::Print => {
+                        let _ = self.iter.next().unwrap().unwrap();
+                        self.expression()?;
+                        if let Some(Ok(Token {
+                            contents: TokenContents::Semicolon,
+                            line,
+                        })) = self.iter.next()
+                        {
+                            self.chunk.add_opcode(Opcode::Print, line);
+                            Ok(())
+                        } else {
+                            errors.push(CompileError::GeneralError(format!(
+                                "Missing semicolon around line {}",
+                                line
+                            )));
+                            Err(errors)
+                        }
+                    }
+                    _ => self.expression_statement(line),
+                }
+            }
+            Err(e) => {
+                errors.push(e.clone().into());
+                Err(errors)
+            }
+        }
+    }
+
+    fn expression_statement(&mut self, estimated_line: usize) -> CompileResult<()> {
+        self.expression()?;
+        if let Some(Ok(Token {
+            contents: TokenContents::Semicolon,
+            line,
+        })) = self.iter.next()
+        {
+            self.chunk.add_opcode(Opcode::Pop, line);
+            Ok(())
+        } else {
+            Err(CompileError::GeneralError(format!(
+                "Missing semicolon around line {}",
+                estimated_line
+            ))
+            .into())
+        }
+    }
+
+    fn expression(&mut self) -> CompileResult<()> {
+        self.expression_bp(BindingPower::None)
+    }
+
+    fn expression_bp(&mut self, min_bp: BindingPower) -> CompileResult<()> {
         let mut errors = CompileErrors::new();
 
         if let Some(token) = self.iter.next() {
@@ -139,7 +204,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
     }
 
     fn parse_unary(&mut self, token: &Token) -> CompileResult<()> {
-        self.compile_bp(BindingPower::Unary)?;
+        self.expression_bp(BindingPower::Unary)?;
         match token.contents {
             TokenContents::Minus => self.chunk.add_opcode(Opcode::Negate, token.line),
             TokenContents::Bang => self.chunk.add_opcode(Opcode::Not, token.line),
@@ -173,7 +238,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
     }
 
     fn parse_term(&mut self, token: &Token) -> CompileResult<()> {
-        self.compile_bp(BindingPower::Term)?;
+        self.expression_bp(BindingPower::Term)?;
         match token.contents {
             TokenContents::Plus => self.chunk.add_opcode(Opcode::Add, token.line),
             TokenContents::Minus => self.chunk.add_opcode(Opcode::Subtract, token.line),
@@ -188,7 +253,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
     }
 
     fn parse_factor(&mut self, token: &Token) -> CompileResult<()> {
-        self.compile_bp(BindingPower::Factor)?;
+        self.expression_bp(BindingPower::Factor)?;
         match token.contents {
             TokenContents::Asterisk => self.chunk.add_opcode(Opcode::Multiply, token.line),
             TokenContents::Slash => self.chunk.add_opcode(Opcode::Divide, token.line),
@@ -196,14 +261,14 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 return Err(CompileError::GeneralError(format!(
                     "Unexpected term token, got {token:?}"
                 ))
-                .into())
+                .into());
             }
         }
         Ok(())
     }
 
     fn parse_grouping(&mut self, _token: &Token) -> CompileResult<()> {
-        self.compile_bp(BindingPower::None)?;
+        self.expression_bp(BindingPower::None)?;
         match self.iter.next() {
             Some(Ok(token)) => match token.contents {
                 TokenContents::RightParen => {}
@@ -232,14 +297,14 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 return Err(CompileError::GeneralError(format!(
                     "Unexpected term token, got {token:?}"
                 ))
-                .into())
+                .into());
             }
         }
         Ok(())
     }
 
     fn parse_equality(&mut self, token: &Token) -> CompileResult<()> {
-        self.compile_bp(BindingPower::Equality)?;
+        self.expression_bp(BindingPower::Equality)?;
         match token.contents {
             TokenContents::EqualEqual => self.chunk.add_opcode(Opcode::Equal, token.line),
             TokenContents::BangEqual => {
@@ -250,14 +315,14 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 return Err(CompileError::GeneralError(format!(
                     "Unexpected equality token, got {token:?}"
                 ))
-                .into())
+                .into());
             }
         }
         Ok(())
     }
 
     fn parse_comparison(&mut self, token: &Token) -> CompileResult<()> {
-        self.compile_bp(BindingPower::Comparison)?;
+        self.expression_bp(BindingPower::Comparison)?;
         match token.contents {
             TokenContents::Greater => self.chunk.add_opcode(Opcode::Greater, token.line),
             TokenContents::GreaterEqual => {
@@ -273,7 +338,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 return Err(CompileError::GeneralError(format!(
                     "Unexpected equality token, got {token:?}"
                 ))
-                .into())
+                .into());
             }
         }
         Ok(())
@@ -294,7 +359,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 return Err(CompileError::GeneralError(format!(
                     "Unexpected string token, got {token:?}"
                 ))
-                .into())
+                .into());
             }
         }
         Ok(())

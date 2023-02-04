@@ -2,7 +2,7 @@ use lox::interpret;
 
 #[test]
 fn comparisons_1() {
-    let source = "nil == true";
+    let source = "print nil == true;";
     let mut out = Vec::new();
     interpret(source, &mut out).unwrap();
     let out = String::from_utf8(out).unwrap();
@@ -12,7 +12,7 @@ fn comparisons_1() {
 
 #[test]
 fn comparisons_2() {
-    let source = "!(5 - 4 > 3 * 2 == !nil)";
+    let source = "print !(5 - 4 > 3 * 2 == !nil);";
     let mut out = Vec::new();
     interpret(source, &mut out).unwrap();
     let out = String::from_utf8(out).unwrap();

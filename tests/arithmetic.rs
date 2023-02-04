@@ -2,7 +2,7 @@ use lox::interpret;
 
 #[test]
 fn simple_arithmetic_1() {
-    let source = "1 + 2 + -3 * 4/(3-5)";
+    let source = "print 1 + 2 + -3 * 4/(3-5);";
     let mut out = Vec::new();
     interpret(source, &mut out).unwrap();
     let out = String::from_utf8(out).unwrap();
@@ -12,7 +12,7 @@ fn simple_arithmetic_1() {
 
 #[test]
 fn simple_arithmetic_2() {
-    let source = "(-1 + 2) * 3 - -4";
+    let source = "print (-1 + 2) * 3 - -4;";
     let mut out = Vec::new();
     interpret(source, &mut out).unwrap();
     let out = String::from_utf8(out).unwrap();
