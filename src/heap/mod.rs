@@ -120,11 +120,7 @@ impl Object {
     pub fn eq(a: *const Self, b: *const Self) -> bool {
         unsafe {
             match (&(*a).obj_type, &(*b).obj_type) {
-                (ObjType::String, ObjType::String) => {
-                    let a = &*(a as *const ObjString);
-                    let b = &*(b as *const ObjString);
-                    a.as_str() == b.as_str()
-                }
+                (ObjType::String, ObjType::String) => a == b,
             }
         }
     }
