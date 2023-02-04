@@ -62,8 +62,19 @@ impl Chunk {
 
     pub fn add_constant(&mut self, value: Value) -> Option<u8> {
         if self.constants.len() < 256 {
-            self.constants.push(value);
-            Some((self.constants.len() - 1) as u8)
+            // Maybe use some set for this? HashTable maybe?
+            let existing_index = self
+                .constants
+                .iter()
+                .enumerate()
+                .find(|(idx, c)| *c == &value)
+                .map(|(idx, _)| idx);
+            if let Some(idx) = existing_index {
+                Some(idx as u8)
+            } else {
+                self.constants.push(value);
+                Some((self.constants.len() - 1) as u8)
+            }
         } else {
             None
         }
