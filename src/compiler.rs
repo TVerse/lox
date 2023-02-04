@@ -46,7 +46,7 @@ impl BindingPower {
 
 pub fn compile<'a, 'b>(
     iter: &'b mut impl Iterator<Item = ScanResult<Token<'a>>>,
-    heap_manager: &'b HeapManager,
+    heap_manager: &'b mut HeapManager,
 ) -> CompileResult<Chunk> {
     let chunk = Chunk::new("main".to_string());
     let mut compiler = Compiler::new(iter, chunk, heap_manager);
@@ -63,14 +63,14 @@ pub fn compile<'a, 'b>(
 struct Compiler<'a, 'b> {
     iter: Peekable<&'b mut dyn Iterator<Item = ScanResult<Token<'a>>>>,
     chunk: Chunk,
-    heap_manager: &'b HeapManager,
+    heap_manager: &'b mut HeapManager,
 }
 
 impl<'a, 'b> Compiler<'a, 'b> {
     fn new(
         iter: &'b mut impl Iterator<Item = ScanResult<Token<'a>>>,
         chunk: Chunk,
-        heap_manager: &'b HeapManager,
+        heap_manager: &'b mut HeapManager,
     ) -> Self {
         let iter: &mut dyn Iterator<Item = ScanResult<Token<'a>>> = iter;
         Self {

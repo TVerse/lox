@@ -3,53 +3,51 @@ use crate::heap::hash_table::HashTable;
 use crate::value::Value;
 use std::alloc::Layout;
 use std::fmt::{Display, Formatter};
-use std::sync::atomic::{AtomicPtr, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::{ptr, slice};
 
 pub mod allocator;
 pub mod hash_table;
 
 pub struct HeapManager {
-    known_objects: AtomicPtr<Object>,
+    known_objects: *mut Object,
     alloc: Arc<Allocator>,
-    strings: Mutex<HashTable>,
+    strings: HashTable,
 }
 
 impl HeapManager {
-    pub fn new(alloc: Arc<Allocator>, strings: HashTable) -> Arc<Self> {
-        Arc::new(Self {
-            known_objects: AtomicPtr::new(ptr::null_mut()),
+    pub fn new(alloc: Arc<Allocator>, strings: HashTable) -> Self {
+        Self {
+            known_objects: ptr::null_mut(),
             alloc,
-            strings: Mutex::new(strings),
-        })
+            strings,
+        }
     }
 
-    unsafe fn register_object(&self, object: *mut Object) {
-        let old = self.known_objects.swap(object, Ordering::SeqCst);
+    unsafe fn register_object(&mut self, object: *mut Object) {
+        let old = self.known_objects;
+        self.known_objects = object;
         (*object).next = old;
     }
 
-    pub fn create_string_copied(&self, s: &str) -> *mut Object {
+    pub fn create_string_copied(&mut self, s: &str) -> *mut Object {
         let str = ObjString::new_copied(s, self.alloc.clone());
-        let mut strings = self.strings.lock().unwrap();
-        if let Some(ptr) = strings.get_string(&str) {
+        if let Some(ptr) = self.strings.get_string(&str) {
             ptr as *mut _
         } else {
             let ptr = unsafe { self.move_to_heap(str) };
-            strings.insert(ptr as *const _, Value::Nil);
+            self.strings.insert(ptr as *const _, Value::Nil);
             ptr
         }
     }
 
-    pub fn create_string_concat(&self, a: &ObjString, b: &ObjString) -> *mut Object {
+    pub fn create_string_concat(&mut self, a: &ObjString, b: &ObjString) -> *mut Object {
         let str = a.concat(b);
-        let mut strings = self.strings.lock().unwrap();
-        if let Some(ptr) = strings.get_string(&str) {
+        if let Some(ptr) = self.strings.get_string(&str) {
             ptr as *mut _
         } else {
             let ptr = unsafe { self.move_to_heap(str) };
-            strings.insert(ptr as *const _, Value::Nil);
+            self.strings.insert(ptr as *const _, Value::Nil);
             ptr
         }
     }
@@ -62,7 +60,7 @@ impl HeapManager {
         self.alloc.dealloc(ptr as *mut u8, layout);
     }
 
-    unsafe fn move_to_heap<T>(&self, object: T) -> *mut Object {
+    unsafe fn move_to_heap<T>(&mut self, object: T) -> *mut Object {
         let ptr = self.alloc.allocate(Layout::new::<T>()) as *mut T;
         ptr.write(object);
         let ptr = ptr as *mut Object;
@@ -74,7 +72,7 @@ impl HeapManager {
 impl Drop for HeapManager {
     fn drop(&mut self) {
         unsafe {
-            let mut obj = self.known_objects.load(Ordering::SeqCst);
+            let mut obj = self.known_objects;
             while !obj.is_null() {
                 let next = (*obj).next;
                 self.drop_object(obj);
@@ -219,7 +217,7 @@ mod tests {
     fn string_interning() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let heap_manager = HeapManager::new(alloc, strings);
+        let mut heap_manager = HeapManager::new(alloc, strings);
         let a = heap_manager.create_string_copied("hi!");
         let b = heap_manager.create_string_copied("hi!");
         let c = heap_manager.create_string_copied("hi!hi!");

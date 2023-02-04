@@ -212,7 +212,7 @@ mod tests {
     fn insert() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let heap_manager = HeapManager::new(alloc.clone(), strings);
+        let mut heap_manager = HeapManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
         let key = {
             let obj = heap_manager.create_string_copied("hi!");
@@ -227,7 +227,7 @@ mod tests {
     fn insert_multiple() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let heap_manager = HeapManager::new(alloc.clone(), strings);
+        let mut heap_manager = HeapManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
         let kvs: Vec<_> = (0..MAX)
             .map(|i| {
@@ -258,7 +258,7 @@ mod tests {
     fn get() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let heap_manager = HeapManager::new(alloc.clone(), strings);
+        let mut heap_manager = HeapManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
         let obj = heap_manager.create_string_copied("hi!");
         let key = Object::as_objstring(obj).unwrap();
@@ -273,7 +273,7 @@ mod tests {
     fn delete() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let heap_manager = HeapManager::new(alloc.clone(), strings);
+        let mut heap_manager = HeapManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
         let kvs: Vec<_> = (0..MAX)
             .map(|i| {

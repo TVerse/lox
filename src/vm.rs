@@ -5,7 +5,6 @@ use arrayvec::ArrayVec;
 use log::{error, trace};
 use num_enum::TryFromPrimitiveError;
 use std::io::Write;
-use std::sync::Arc;
 use thiserror::Error;
 
 type VMResult<A> = Result<A, InterpretError>;
@@ -17,11 +16,11 @@ pub struct VM<'a, W: Write> {
     ip: usize,
     // could this be a list of refs? Runs into lifetime issues!
     stack: ArrayVec<Value, STACK_SIZE>,
-    heap_manager: Arc<HeapManager>,
+    heap_manager: HeapManager,
 }
 
 impl<'a, W: Write> VM<'a, W> {
-    pub fn new(write: &'a mut W, heap_manager: Arc<HeapManager>) -> Self {
+    pub fn new(write: &'a mut W, heap_manager: HeapManager) -> Self {
         Self {
             write,
             ip: 0,
