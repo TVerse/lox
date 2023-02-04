@@ -64,6 +64,7 @@ struct Compiler<'a, 'b> {
     iter: Peekable<&'b mut dyn Iterator<Item = ScanResult<Token<'a>>>>,
     chunk: Chunk,
     heap_manager: &'b mut HeapManager,
+    errors: CompileErrors,
 }
 
 impl<'a, 'b> Compiler<'a, 'b> {
@@ -77,6 +78,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
             iter: iter.peekable(),
             chunk,
             heap_manager,
+            errors: CompileErrors::default(),
         }
     }
 
@@ -85,11 +87,40 @@ impl<'a, 'b> Compiler<'a, 'b> {
             self.declaration()?;
         }
 
-        Ok(())
+        if self.errors.errors.is_empty() {
+            Ok(())
+        } else {
+            Err(self.errors.clone())
+        }
     }
 
     fn declaration(&mut self) -> CompileResult<()> {
-        self.statement()
+        if let Err(e) = self.statement() {
+            self.synchronize(e);
+        }
+        Ok(())
+    }
+
+    fn synchronize(&mut self, e: CompileErrors) {
+        self.errors.extend(e);
+        while let Some(Ok(token)) = self.iter.next() {
+            if token.contents == TokenContents::Semicolon {
+                break;
+            }
+            if let Some(Ok(token)) = self.iter.peek() {
+                match token.contents {
+                    TokenContents::Class
+                    | TokenContents::Fun
+                    | TokenContents::Var
+                    | TokenContents::For
+                    | TokenContents::If
+                    | TokenContents::While
+                    | TokenContents::Print
+                    | TokenContents::Return => break,
+                    _ => continue,
+                }
+            }
+        }
     }
 
     fn statement(&mut self) -> CompileResult<()> {
@@ -414,8 +445,7 @@ enum OperatorType {
 
 type Parser<'a, 'b, 'c> = fn(&'c mut Compiler<'a, 'b>, &'c Token<'b>) -> CompileResult<()>;
 
-// TODO custom Display
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub struct CompileErrors {
     errors: Vec<CompileError>,
 }
@@ -449,6 +479,16 @@ impl CompileErrors {
     fn extend(&mut self, other: CompileErrors) {
         self.errors.extend(other.errors.into_iter())
     }
+
+    pub fn errors(&self) -> &[CompileError] {
+        &self.errors
+    }
+}
+
+impl Default for CompileErrors {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl From<CompileError> for CompileErrors {
@@ -459,7 +499,7 @@ impl From<CompileError> for CompileErrors {
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum CompileError {
     #[error(transparent)]
     ScanError(#[from] ScanError),

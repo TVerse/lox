@@ -1,12 +1,12 @@
-use crate::compiler::compile;
+use crate::compiler::{compile, CompileErrors};
 use crate::heap::allocator::Allocator;
 use crate::heap::hash_table::HashTable;
 use crate::heap::HeapManager;
 use crate::scanner::Scanner;
-use crate::vm::VM;
-use anyhow::Result;
+use crate::vm::{VMError, VM};
 use log::trace;
 use std::io::Write;
+use thiserror::Error;
 
 mod chunk;
 mod compiler;
@@ -15,7 +15,7 @@ mod scanner;
 mod value;
 mod vm;
 
-pub fn interpret<W: Write>(source: &str, write: &mut W) -> Result<()> {
+pub fn interpret<W: Write>(source: &str, write: &mut W) -> Result<(), InterpretError> {
     trace!("Got input string: {source}");
     let scanner = Scanner::new(source);
     let alloc = Allocator::new();
@@ -25,4 +25,12 @@ pub fn interpret<W: Write>(source: &str, write: &mut W) -> Result<()> {
     let mut vm = VM::new(write, heap_manager);
     vm.run(&chunk)?;
     Ok(())
+}
+
+#[derive(Error, Debug, Clone)]
+pub enum InterpretError {
+    #[error(transparent)]
+    CompileErrors(#[from] CompileErrors),
+    #[error(transparent)]
+    InterpretError(#[from] VMError),
 }

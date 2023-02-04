@@ -7,7 +7,7 @@ use num_enum::TryFromPrimitiveError;
 use std::io::Write;
 use thiserror::Error;
 
-type VMResult<A> = Result<A, InterpretError>;
+type VMResult<A> = Result<A, VMError>;
 
 const STACK_SIZE: usize = 256;
 
@@ -148,7 +148,7 @@ impl<'a, W: Write> VM<'a, W> {
 
         let res = match (a, b) {
             (Value::Number(a), Value::Number(b)) => v(f(a, b)),
-            (_, _) => return Err(InterpretError::RuntimeError(RuntimeError::InvalidTypes)),
+            (_, _) => return Err(VMError::RuntimeError(RuntimeError::InvalidTypes)),
         };
         self.push(res)?;
         Ok(())
@@ -177,15 +177,15 @@ impl<'a, W: Write> VM<'a, W> {
     }
 }
 
-#[derive(Error, Debug)]
-pub enum InterpretError {
+#[derive(Error, Debug, Clone)]
+pub enum VMError {
     #[error("Compilation error: {0}")]
     IncorrectInvariantError(#[from] IncorrectInvariantError),
     #[error("Runtime error: {0}")]
     RuntimeError(#[from] RuntimeError),
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum IncorrectInvariantError {
     #[error("invalid opcode? {0}")]
     InvalidOpcode(#[from] TryFromPrimitiveError<Opcode>),
@@ -195,7 +195,7 @@ pub enum IncorrectInvariantError {
     StackUnderflow,
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum RuntimeError {
     #[error("invalid instruction pointer {pointer}, max length {chunk_length}")]
     InvalidInstructionPointer { pointer: usize, chunk_length: usize },
