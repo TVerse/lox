@@ -1,5 +1,5 @@
 use crate::chunk::{Chunk, Opcode};
-use crate::heap::{MemoryManager, Object};
+use crate::heap::{HeapManager, Object};
 use crate::value::Value;
 use arrayvec::ArrayVec;
 use log::{error, trace};
@@ -16,16 +16,16 @@ pub struct VM<'a, W: Write> {
     ip: usize,
     // could this be a list of refs? Runs into lifetime issues!
     stack: ArrayVec<Value, STACK_SIZE>,
-    mm: &'a mut MemoryManager,
+    heap_manager: HeapManager,
 }
 
 impl<'a, W: Write> VM<'a, W> {
-    pub fn new(write: &'a mut W, mm: &'a mut MemoryManager) -> Self {
+    pub fn new(write: &'a mut W, heap_manager: HeapManager) -> Self {
         Self {
             write,
             ip: 0,
             stack: ArrayVec::new(),
-            mm,
+            heap_manager,
         }
     }
 
@@ -67,14 +67,15 @@ impl<'a, W: Write> VM<'a, W> {
                         (Value::Number(_), Value::Number(_)) => {
                             self.binary_op(|a, b| a + b, Value::Number)?
                         }
-                        (Value::Obj(ptra), Value::Obj(ptrb)) => unsafe {
-                            let a = &**ptra;
-                            let b = &**ptrb;
-                            match (a.as_str(), b.as_str()) {
+                        (Value::Obj(ptra), Value::Obj(ptrb)) => {
+                            match (
+                                Object::as_objstring(*ptra as *const _),
+                                Object::as_objstring(*ptrb as *const _),
+                            ) {
                                 (Some(_), Some(_)) => self.concatenate()?,
                                 _ => return Err(RuntimeError::InvalidTypes.into()),
                             }
-                        },
+                        }
                         _ => return Err(RuntimeError::InvalidTypes.into()),
                     };
                 }
@@ -156,16 +157,14 @@ impl<'a, W: Write> VM<'a, W> {
         let a = self.pop()?;
         let (a, b) = match (a, b) {
             (Value::Obj(a), Value::Obj(b)) => unsafe {
-                let a = &*a;
-                let b = &*b;
-                match (a.as_str(), b.as_str()) {
-                    (Some(a), Some(b)) => (a, b),
+                match (Object::as_objstring(a), Object::as_objstring(b)) {
+                    (Some(a), Some(b)) => (&*a, &*b),
                     _ => unreachable!(),
                 }
             },
             _ => unreachable!(),
         };
-        let value = Value::Obj(Object::new_str_concat(a, b, self.mm));
+        let value = Value::Obj(self.heap_manager.create_string_concat(a, b));
         self.push(value)
     }
 }

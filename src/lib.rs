@@ -1,5 +1,7 @@
 use crate::compiler::compile;
-use crate::heap::MemoryManager;
+use crate::heap::allocator::Allocator;
+use crate::heap::hash_table::HashTable;
+use crate::heap::HeapManager;
 use crate::scanner::Scanner;
 use crate::vm::VM;
 use anyhow::Result;
@@ -16,9 +18,11 @@ mod vm;
 pub fn interpret<W: Write>(source: &str, write: &mut W) -> Result<()> {
     trace!("Got input string: {source}");
     let scanner = Scanner::new(source);
-    let mut mm = MemoryManager::new();
-    let chunk = compile(&mut scanner.iter(), &mut mm)?;
-    let mut vm = VM::new(write, &mut mm);
+    let alloc = Allocator::new();
+    let strings = HashTable::new(alloc.clone());
+    let mut heap_manager = HeapManager::new(alloc, strings);
+    let chunk = compile(&mut scanner.iter(), &mut heap_manager)?;
+    let mut vm = VM::new(write, heap_manager);
     vm.run(&chunk)?;
     Ok(())
 }

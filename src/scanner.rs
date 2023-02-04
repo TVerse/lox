@@ -384,8 +384,7 @@ mod tests {
         let source = "a \tb\n\r//cömment\nc";
         let scanner = Scanner::new(source);
         let iter = scanner.iter();
-        let res: Vec<_> = iter.collect();
-        assert_eq!(res.len(), 3);
+        assert_eq!(iter.count(), 3);
     }
 
     #[test]
