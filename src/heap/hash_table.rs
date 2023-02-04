@@ -219,7 +219,7 @@ mod tests {
             Object::as_objstring(obj).unwrap()
         };
         let value = Value::Number(1.5);
-        assert!(table.insert(key, value.clone()));
+        assert!(table.insert(key, value));
         assert!(!table.insert(key, value));
     }
 
@@ -241,11 +241,11 @@ mod tests {
             .collect();
 
         for (k, v) in kvs.iter() {
-            assert!(table.insert(*k, v.clone()), "{k:?}, {}, {v}", unsafe {
+            assert!(table.insert(*k, *v), "{k:?}, {}, {v}", unsafe {
                 &**k
             });
             assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {}, {v}", unsafe { &**k });
-            assert!(!table.insert(*k, v.clone()), "{k:?}, {}, {v}", unsafe {
+            assert!(!table.insert(*k, *v), "{k:?}, {}, {v}", unsafe {
                 &**k
             });
         }
@@ -264,7 +264,7 @@ mod tests {
         let key = Object::as_objstring(obj).unwrap();
         let value = Value::Number(1.5);
         assert_eq!(table.get(key), None);
-        assert!(table.insert(key, value.clone()));
+        assert!(table.insert(key, value));
         assert_eq!(table.get(key).unwrap(), &value);
         assert!(!table.insert(key, value));
     }
@@ -287,11 +287,11 @@ mod tests {
             .collect();
 
         for (k, v) in kvs.iter() {
-            assert!(table.insert(*k, v.clone()), "{k:?}, {}, {v}", unsafe {
+            assert!(table.insert(*k, *v), "{k:?}, {}, {v}", unsafe {
                 &**k
             });
             assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {}, {v}", unsafe { &**k });
-            assert!(!table.insert(*k, v.clone()), "{k:?}, {}, {v}", unsafe {
+            assert!(!table.insert(*k, *v), "{k:?}, {}, {v}", unsafe {
                 &**k
             });
             assert!(table.delete(*k));

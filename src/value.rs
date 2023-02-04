@@ -1,7 +1,7 @@
 use crate::heap::Object;
 use std::fmt::{Display, Formatter};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Value {
     Number(f64),
     Boolean(bool),

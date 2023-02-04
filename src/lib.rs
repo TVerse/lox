@@ -20,9 +20,9 @@ pub fn interpret<W: Write>(source: &str, write: &mut W) -> Result<(), InterpretE
     let scanner = Scanner::new(source);
     let alloc = Allocator::new();
     let strings = HashTable::new(alloc.clone());
-    let mut heap_manager = HeapManager::new(alloc, strings);
+    let mut heap_manager = HeapManager::new(alloc.clone(), strings);
     let chunk = compile(&mut scanner.iter(), &mut heap_manager)?;
-    let mut vm = VM::new(write, heap_manager);
+    let mut vm = VM::new(write, heap_manager, alloc);
     vm.run(&chunk)?;
     Ok(())
 }

@@ -1,10 +1,13 @@
 use crate::chunk::{Chunk, Opcode};
-use crate::heap::{HeapManager, Object};
+use crate::heap::allocator::Allocator;
+use crate::heap::hash_table::HashTable;
+use crate::heap::{HeapManager, ObjString, Object};
 use crate::value::Value;
 use arrayvec::ArrayVec;
 use log::{error, trace};
 use num_enum::TryFromPrimitiveError;
 use std::io::Write;
+use std::sync::Arc;
 use thiserror::Error;
 
 type VMResult<A> = Result<A, VMError>;
@@ -17,15 +20,17 @@ pub struct VM<'a, W: Write> {
     // could this be a list of refs? Runs into lifetime issues!
     stack: ArrayVec<Value, STACK_SIZE>,
     heap_manager: HeapManager,
+    globals: HashTable,
 }
 
 impl<'a, W: Write> VM<'a, W> {
-    pub fn new(write: &'a mut W, heap_manager: HeapManager) -> Self {
+    pub fn new(write: &'a mut W, heap_manager: HeapManager, allocator: Arc<Allocator>) -> Self {
         Self {
             write,
             ip: 0,
             stack: ArrayVec::new(),
             heap_manager,
+            globals: HashTable::new(allocator),
         }
     }
 
@@ -44,7 +49,7 @@ impl<'a, W: Write> VM<'a, W> {
                 Opcode::try_from(self.read_byte(chunk)?).map_err(IncorrectInvariantError::from)?;
             match opcode {
                 Opcode::Constant => {
-                    let constant = (*self.read_constant(chunk)?).clone();
+                    let constant = *self.read_constant(chunk)?;
                     self.push(constant)?;
                 }
                 Opcode::Return => break,
@@ -96,6 +101,41 @@ impl<'a, W: Write> VM<'a, W> {
                 }
                 Opcode::Pop => {
                     let _ = self.pop()?;
+                }
+                Opcode::DefineGlobal => {
+                    let name = self.read_constant(chunk)?;
+                    match name {
+                        Value::Obj(obj) => {
+                            if let Some(s) = Object::as_objstring(*obj) {
+                                let value = self.peek(0)?;
+                                self.globals.insert(s, *value);
+                                let _ = self.pop();
+                            } else {
+                                return Err(IncorrectInvariantError::InvalidTypes.into());
+                            }
+                        }
+                        _ => return Err(IncorrectInvariantError::InvalidTypes.into()),
+                    }
+                }
+                Opcode::GetGlobal => {
+                    let name = self.read_constant(chunk)?;
+                    match name {
+                        Value::Obj(obj) => {
+                            if let Some(s) = Object::as_objstring(*obj) {
+                                if let Some(v) = self.globals.get(s) {
+                                    self.push(*v)?;
+                                } else {
+                                    return Err(RuntimeError::UndefinedVariable(Object::to_string(
+                                        s as *const Object,
+                                    ))
+                                    .into());
+                                }
+                            } else {
+                                return Err(IncorrectInvariantError::InvalidTypes.into());
+                            }
+                        }
+                        _ => return Err(IncorrectInvariantError::InvalidTypes.into()),
+                    }
                 }
             }
         }
@@ -193,6 +233,8 @@ pub enum IncorrectInvariantError {
     InvalidConstant { index: u8 },
     #[error("stack underflow?")]
     StackUnderflow,
+    #[error("invalid compile time types")]
+    InvalidTypes,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -203,4 +245,6 @@ pub enum RuntimeError {
     StackOverflow,
     #[error("invalid types")]
     InvalidTypes,
+    #[error("undefined variable {0}")]
+    UndefinedVariable(String),
 }

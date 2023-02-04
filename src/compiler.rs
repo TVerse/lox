@@ -83,7 +83,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
     }
 
     fn compile(&mut self) -> CompileResult<()> {
-        while self.iter.peek().is_some() {
+        while let Some(Ok(_)) = self.iter.peek() {
             self.declaration()?;
         }
 
@@ -95,7 +95,13 @@ impl<'a, 'b> Compiler<'a, 'b> {
     }
 
     fn declaration(&mut self) -> CompileResult<()> {
-        if let Err(e) = self.statement() {
+        let contents = &self.iter.peek().unwrap().as_ref().unwrap().contents;
+        let result = if *contents == TokenContents::Var {
+            self.var_declaration()
+        } else {
+            self.statement()
+        };
+        if let Err(e) = result {
             self.synchronize(e);
         }
         Ok(())
@@ -121,6 +127,76 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 }
             }
         }
+    }
+
+    fn var_declaration(&mut self) -> CompileResult<()> {
+        let mut errors = CompileErrors::new();
+        let _ = self.iter.next();
+        let constant_index = self.parse_variable()?;
+        if let Some(Ok(token)) = self.iter.peek() {
+            match token.contents {
+                TokenContents::Equal => {
+                    let _ = self.iter.next();
+                    self.expression()?
+                }
+                _ => self.chunk.add_opcode(Opcode::Nil, token.line),
+            }
+        }
+        if let Some(Ok(Token {
+            contents: TokenContents::Semicolon,
+            line,
+        })) = self.iter.next()
+        {
+            self.define_variable(constant_index, line)
+        } else {
+            errors.push(CompileError::GeneralError(
+                "Missing semicolon after variable declaration".to_string(),
+            ));
+            Err(errors)
+        }
+    }
+
+    fn parse_variable(&mut self) -> CompileResult<u8> {
+        let mut errors = CompileErrors::new();
+        match self.iter.next() {
+            Some(token) => match token {
+                Ok(token) => {
+                    let line = token.line;
+                    match token.contents {
+                        TokenContents::Identifier(id) => self.identifier_constant(id),
+                        _ => {
+                            errors.push(CompileError::GeneralError(
+                                format!("Expected identifier after 'var' on line {line}")
+                            ));
+                            Err(errors)
+                        }
+                    }
+                }
+                Err(e) => {
+                    errors.push(e.into());
+                    Err(errors)
+                }
+            },
+            None => {
+                errors.push(CompileError::GeneralError(
+                    "Unexpected end of stream after 'var' declaration".to_string(),
+                ));
+                Err(errors)
+            }
+        }
+    }
+
+    fn identifier_constant(&mut self, id: &str) -> CompileResult<u8> {
+        self.chunk
+            .add_constant(Value::Obj(self.heap_manager.create_string_copied(id)))
+            .ok_or_else(||CompileErrors::from(CompileError::TooManyConstants))
+    }
+
+    fn define_variable(&mut self, idx: u8, line: usize) -> CompileResult<()> {
+        self
+            .chunk
+            .add_opcode_and_operand(Opcode::DefineGlobal, idx, line);
+        Ok(())
     }
 
     fn statement(&mut self) -> CompileResult<()> {
@@ -262,7 +338,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         let constant = self
             .chunk
             .add_constant(Value::Number(number))
-            .ok_or(CompileError::TooManyConstants)?;
+            .ok_or_else(||CompileErrors::from(CompileError::TooManyConstants))?;
         self.chunk
             .add_opcode_and_operand(Opcode::Constant, constant, token.line);
         Ok(())
@@ -382,13 +458,30 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 let constant = self
                     .chunk
                     .add_constant(value)
-                    .ok_or(CompileError::TooManyConstants)?;
+                    .ok_or_else(||CompileErrors::from(CompileError::TooManyConstants))?;
                 self.chunk
                     .add_opcode_and_operand(Opcode::Constant, constant, token.line)
             }
             _ => {
                 return Err(CompileError::GeneralError(format!(
                     "Unexpected string token, got {token:?}"
+                ))
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_identifier(&mut self, token: &Token) -> CompileResult<()> {
+        match token.contents {
+            TokenContents::Identifier(id) => {
+                let idx = self.identifier_constant(id)?;
+                self.chunk
+                    .add_opcode_and_operand(Opcode::GetGlobal, idx, token.line);
+            }
+            _ => {
+                return Err(CompileError::GeneralError(format!(
+                    "Unexpected identifier token, got {token:?}"
                 ))
                 .into());
             }
@@ -432,6 +525,9 @@ fn get_parser<'a, 'b, 'c>(
         ) => Some((Compiler::parse_comparison, BindingPower::Comparison)),
         (TokenContents::String(_), OperatorType::Prefix) => {
             Some((Compiler::parse_string, BindingPower::None))
+        }
+        (TokenContents::Identifier(_), OperatorType::Prefix) => {
+            Some((Compiler::parse_identifier, BindingPower::None))
         }
         _ => None,
     }

@@ -23,6 +23,8 @@ pub enum Opcode {
     Less,
     Print,
     Pop,
+    DefineGlobal,
+    GetGlobal,
 }
 
 impl Opcode {
@@ -148,7 +150,9 @@ impl Chunk {
                     | Opcode::Less
                     | Opcode::Print
                     | Opcode::Pop => simple_instruction(opcode),
-                    Opcode::Constant => self.constant_instruction(opcode, iter.next().map(code)),
+                    Opcode::Constant | Opcode::DefineGlobal | Opcode::GetGlobal => {
+                        self.constant_instruction(opcode, iter.next().map(code))
+                    }
                 }
             } else {
                 format!("Unknown opcode 0x{opcode:02x}")
