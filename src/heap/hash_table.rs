@@ -1,29 +1,33 @@
-use crate::heap::{MemoryManager, ObjString};
+use crate::heap::allocator::Allocator;
+use crate::heap::ObjString;
 use crate::value::Value;
 use std::alloc::Layout;
 use std::ptr;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct HashTable {
     count: usize,
     capacity: usize,
     entries: *mut Entry,
+    alloc: Arc<Allocator>,
 }
 
 impl HashTable {
     const MAX_LOAD: f64 = 0.75;
 
-    pub fn new() -> Self {
+    pub fn new(alloc: Arc<Allocator>) -> Self {
         Self {
             count: 0,
             capacity: 0,
             entries: ptr::null_mut(),
+            alloc,
         }
     }
 
-    pub unsafe fn clear(&mut self, mm: &mut MemoryManager) {
+    pub unsafe fn clear(&mut self) {
         if !self.entries.is_null() {
-            mm.dealloc(
+            self.alloc.dealloc(
                 self.entries as *mut u8,
                 Layout::array::<Entry>(self.capacity).unwrap(),
             )
@@ -67,10 +71,10 @@ impl HashTable {
     }
 
     // TODO Option<Value>
-    pub fn insert(&mut self, key: *const ObjString, value: Value, mm: &mut MemoryManager) -> bool {
+    pub fn insert(&mut self, key: *const ObjString, value: Value) -> bool {
         if (self.count + 1) as f64 > (self.capacity as f64) * Self::MAX_LOAD {
             let new_capacity = self.grow_capacity();
-            self.adjust_capacity(new_capacity, mm)
+            self.adjust_capacity(new_capacity)
         }
 
         let entry = Self::find_entry(self.entries, key, self.capacity);
@@ -99,9 +103,12 @@ impl HashTable {
         unsafe { std::slice::from_raw_parts(self.entries as *const _, self.capacity) }
     }
 
-    fn adjust_capacity(&mut self, new_capacity: usize, mm: &mut MemoryManager) {
+    fn adjust_capacity(&mut self, new_capacity: usize) {
         unsafe {
-            let entries = mm.allocate(Layout::array::<Entry>(new_capacity).unwrap()) as *mut Entry;
+            let entries = self
+                .alloc
+                .allocate(Layout::array::<Entry>(new_capacity).unwrap())
+                as *mut Entry;
             for i in 0..new_capacity {
                 let entry = Entry {
                     key: ptr::null_mut(),
@@ -121,7 +128,7 @@ impl HashTable {
             }
 
             if !self.entries.is_null() {
-                mm.dealloc(
+                self.alloc.dealloc(
                     self.entries as *mut u8,
                     Layout::array::<Entry>(self.capacity).unwrap(),
                 )
@@ -170,33 +177,35 @@ struct Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::heap::Object;
+    use crate::heap::{HeapManager, Object};
 
     const MAX: usize = if cfg!(miri) { 17 } else { 2500 };
 
     #[test]
     fn insert() {
-        let mut mm = MemoryManager::new();
-        let mut table = HashTable::new();
-        let key: *const ObjString = {
-            let obj = Object::new_str("hi", &mut mm);
-            unsafe { (&*obj).as_str().unwrap() }
+        let alloc = Allocator::new();
+        let heap_manager = HeapManager::new(alloc.clone());
+        let mut table = HashTable::new(alloc);
+        let key = {
+            let obj = heap_manager.create_string_copied("hi!");
+            Object::as_objstring(obj).unwrap()
         };
         let value = Value::Number(1.5);
-        assert!(table.insert(key, value.clone(), &mut mm));
-        assert!(!table.insert(key, value, &mut mm));
-        unsafe { table.clear(&mut mm) };
+        assert!(table.insert(key, value.clone()));
+        assert!(!table.insert(key, value));
+        unsafe { table.clear() };
     }
 
     #[test]
     fn insert_multiple() {
-        let mut mm = MemoryManager::new();
-        let mut table = HashTable::new();
+        let alloc = Allocator::new();
+        let heap_manager = HeapManager::new(alloc.clone());
+        let mut table = HashTable::new(alloc);
         let kvs: Vec<_> = (0..MAX)
             .map(|i| {
-                let key: *const ObjString = {
-                    let obj = Object::new_str(&format!("hi{i}"), &mut mm);
-                    unsafe { (&*obj).as_str().unwrap() }
+                let key = {
+                    let obj = heap_manager.create_string_copied(&format!("hi{i}"));
+                    Object::as_objstring(obj).unwrap()
                 };
                 let value = Value::Number(i as f64);
                 (key, value)
@@ -204,47 +213,45 @@ mod tests {
             .collect();
 
         for (k, v) in kvs.iter() {
-            assert!(
-                table.insert(*k, v.clone(), &mut mm),
-                "{k:?}, {}, {v}",
-                unsafe { &**k }
-            );
+            assert!(table.insert(*k, v.clone()), "{k:?}, {}, {v}", unsafe {
+                &**k
+            });
             assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {}, {v}", unsafe { &**k });
-            assert!(
-                !table.insert(*k, v.clone(), &mut mm),
-                "{k:?}, {}, {v}",
-                unsafe { &**k }
-            );
+            assert!(!table.insert(*k, v.clone()), "{k:?}, {}, {v}", unsafe {
+                &**k
+            });
         }
         for (k, v) in kvs.iter() {
             assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {}, {v}", unsafe { &**k });
         }
-        unsafe { table.clear(&mut mm) };
+        unsafe { table.clear() };
     }
 
     #[test]
     fn get() {
-        let mut mm = MemoryManager::new();
-        let mut table = HashTable::new();
-        let obj = Object::new_str("hi", &mut mm);
-        let key: *const ObjString = { unsafe { (&*obj).as_str().unwrap() } };
+        let alloc = Allocator::new();
+        let heap_manager = HeapManager::new(alloc.clone());
+        let mut table = HashTable::new(alloc);
+        let obj = heap_manager.create_string_copied("hi!");
+        let key = Object::as_objstring(obj).unwrap();
         let value = Value::Number(1.5);
         assert_eq!(table.get(key), None);
-        assert!(table.insert(key, value.clone(), &mut mm));
+        assert!(table.insert(key, value.clone()));
         assert_eq!(table.get(key).unwrap(), &value);
-        assert!(!table.insert(key, value.clone(), &mut mm));
-        unsafe { table.clear(&mut mm) };
+        assert!(!table.insert(key, value));
+        unsafe { table.clear() };
     }
 
     #[test]
     fn delete() {
-        let mut mm = MemoryManager::new();
-        let mut table = HashTable::new();
+        let alloc = Allocator::new();
+        let heap_manager = HeapManager::new(alloc.clone());
+        let mut table = HashTable::new(alloc);
         let kvs: Vec<_> = (0..MAX)
             .map(|i| {
-                let key: *const ObjString = {
-                    let obj = Object::new_str(&format!("hi{i}"), &mut mm);
-                    unsafe { (&*obj).as_str().unwrap() }
+                let key = {
+                    let obj = heap_manager.create_string_copied(&format!("hi{i}"));
+                    Object::as_objstring(obj).unwrap()
                 };
                 let value = Value::Number(i as f64);
                 (key, value)
@@ -252,23 +259,19 @@ mod tests {
             .collect();
 
         for (k, v) in kvs.iter() {
-            assert!(
-                table.insert(*k, v.clone(), &mut mm),
-                "{k:?}, {}, {v}",
-                unsafe { &**k }
-            );
+            assert!(table.insert(*k, v.clone()), "{k:?}, {}, {v}", unsafe {
+                &**k
+            });
             assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {}, {v}", unsafe { &**k });
-            assert!(
-                !table.insert(*k, v.clone(), &mut mm),
-                "{k:?}, {}, {v}",
-                unsafe { &**k }
-            );
+            assert!(!table.insert(*k, v.clone()), "{k:?}, {}, {v}", unsafe {
+                &**k
+            });
             assert!(table.delete(*k));
             assert_eq!(table.get(*k), None, "{k:?}, {}, {v}", unsafe { &**k });
         }
         for (k, v) in kvs.iter() {
             assert_eq!(table.get(*k), None, "{k:?}, {}, {v}", unsafe { &**k });
         }
-        unsafe { table.clear(&mut mm) };
+        unsafe { table.clear() };
     }
 }

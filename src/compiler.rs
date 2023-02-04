@@ -1,6 +1,5 @@
 use crate::chunk::{Chunk, Opcode};
-use crate::heap::MemoryManager;
-use crate::heap::Object;
+use crate::heap::HeapManager;
 use crate::scanner::{ScanError, ScanResult, Token, TokenContents};
 use crate::value::Value;
 use log::trace;
@@ -47,10 +46,10 @@ impl BindingPower {
 
 pub fn compile<'a, 'b>(
     iter: &'b mut impl Iterator<Item = ScanResult<Token<'a>>>,
-    mm: &'b mut MemoryManager,
+    heap_manager: &'b HeapManager,
 ) -> CompileResult<Chunk> {
     let chunk = Chunk::new("main".to_string());
-    let mut compiler = Compiler::new(iter, chunk, mm);
+    let mut compiler = Compiler::new(iter, chunk, heap_manager);
     compiler.compile()?;
     let Compiler { mut chunk, .. } = compiler;
 
@@ -64,20 +63,20 @@ pub fn compile<'a, 'b>(
 struct Compiler<'a, 'b> {
     iter: Peekable<&'b mut dyn Iterator<Item = ScanResult<Token<'a>>>>,
     chunk: Chunk,
-    mm: &'b mut MemoryManager,
+    heap_manager: &'b HeapManager,
 }
 
 impl<'a, 'b> Compiler<'a, 'b> {
     fn new(
         iter: &'b mut impl Iterator<Item = ScanResult<Token<'a>>>,
         chunk: Chunk,
-        mm: &'b mut MemoryManager,
+        heap_manager: &'b HeapManager,
     ) -> Self {
         let iter: &mut dyn Iterator<Item = ScanResult<Token<'a>>> = iter;
         Self {
             iter: iter.peekable(),
             chunk,
-            mm,
+            heap_manager,
         }
     }
 
@@ -283,7 +282,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
     fn parse_string(&mut self, token: &Token) -> CompileResult<()> {
         match token.contents {
             TokenContents::String(s) => {
-                let value = Value::Obj(Object::new_str(s, self.mm) as *mut _);
+                let value = Value::Obj(self.heap_manager.create_string_copied(s) as *mut _);
                 let constant = self
                     .chunk
                     .add_constant(value)

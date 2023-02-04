@@ -1,8 +1,9 @@
-use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use log::trace;
+use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
+#[derive(Debug)]
 pub struct Allocator {
     allocated: AtomicUsize,
 }
@@ -38,4 +39,3 @@ impl Allocator {
         );
     }
 }
-

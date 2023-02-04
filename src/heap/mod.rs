@@ -1,52 +1,53 @@
-use log::trace;
-use std::fmt::{Display, Formatter};
-use std::{ptr, slice};
-use std::alloc::Layout;
-use std::sync::Arc;
 use crate::heap::allocator::Allocator;
+use std::alloc::Layout;
+use std::fmt::{Display, Formatter};
+use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::Arc;
+use std::{ptr, slice};
 
 pub mod allocator;
+pub mod hash_table;
 
 pub struct HeapManager {
-    known_objects: *mut Object,
+    known_objects: AtomicPtr<Object>,
     alloc: Arc<Allocator>,
 }
 
 impl HeapManager {
-    pub fn new(alloc: Arc<Allocator>) -> Self {
-        Self {
-            known_objects: ptr::null_mut(),
+    pub fn new(alloc: Arc<Allocator>) -> Arc<Self> {
+        Arc::new(Self {
+            known_objects: AtomicPtr::new(ptr::null_mut()),
             alloc,
-        }
+        })
     }
 
-    unsafe fn register_object(&mut self, object: *mut Object) {
-        (*object).next = self.known_objects;
-        self.known_objects = object;
+    unsafe fn register_object(&self, object: *mut Object) {
+        let old = self.known_objects.swap(object, Ordering::SeqCst);
+        (*object).next = old;
     }
 
-    pub fn create_string_copied(&mut self, s: &str) -> *mut Object {
-        let inner = Inner::String(ObjString::new_copied(s, self.alloc.clone()));
-        let object = Object::new(inner);
-        let ptr = unsafe { self.move_object_to_heap(object) };
-        ptr
+    pub fn create_string_copied(&self, s: &str) -> *mut Object {
+        let str = ObjString::new_copied(s, self.alloc.clone());
+        unsafe { self.move_to_heap(str) }
     }
 
-    pub fn create_string_concat(&mut self, a: &ObjString, b: &ObjString) -> *mut Object {
-        let inner = Inner::String(a.concat(b));
-        let object = Object::new(inner);
-        let ptr = unsafe { self.move_object_to_heap(object) };
-        ptr
+    pub fn create_string_concat(&self, a: &ObjString, b: &ObjString) -> *mut Object {
+        let str = a.concat(b);
+        unsafe { self.move_to_heap(str) }
     }
 
     pub unsafe fn drop_object(&self, ptr: *mut Object) {
+        let (layout, ptr) = match (*ptr).obj_type {
+            ObjType::String => (Layout::new::<ObjString>(), ptr as *mut ObjString),
+        };
         ptr.drop_in_place();
-        self.alloc.dealloc(next as *mut u8, Layout::new::<Object>());
+        self.alloc.dealloc(ptr as *mut u8, layout);
     }
 
-    unsafe fn move_object_to_heap(&mut self, object: Object) -> *mut Object {
-        let ptr = self.alloc.allocate(Layout::new::<Object>()) as *mut Object;
+    unsafe fn move_to_heap<T>(&self, object: T) -> *mut Object {
+        let ptr = self.alloc.allocate(Layout::new::<T>()) as *mut T;
         ptr.write(object);
+        let ptr = ptr as *mut Object;
         self.register_object(ptr);
         ptr
     }
@@ -55,10 +56,10 @@ impl HeapManager {
 impl Drop for HeapManager {
     fn drop(&mut self) {
         unsafe {
-            let mut obj = self.known_objects;
+            let mut obj = self.known_objects.load(Ordering::SeqCst);
             while !obj.is_null() {
                 let next = (*obj).next;
-                self.drop_object(next);
+                self.drop_object(obj);
                 obj = next;
             }
         }
@@ -66,51 +67,54 @@ impl Drop for HeapManager {
 }
 
 pub struct Object {
-    inner: Inner,
     next: *mut Object,
+    obj_type: ObjType,
 }
 
-enum Inner {
-    String(ObjString),
+enum ObjType {
+    String,
 }
 
 impl Object {
-    fn new(inner: Inner) -> Self {
+    fn new(typ: ObjType) -> Self {
         Self {
-            inner,
             next: ptr::null_mut(),
+            obj_type: typ,
         }
     }
 
-    pub fn as_str(&self) -> Option<&ObjString> {
-        match &self.inner {
-            Inner::String(ptr) => Some(unsafe { &**ptr }),
+    pub fn as_objstring(ptr: *const Self) -> Option<*const ObjString> {
+        unsafe {
+            match (*ptr).obj_type {
+                ObjType::String => Some(ptr as *const ObjString),
+            }
+        }
+    }
+
+    pub fn to_string(ptr: *const Self) -> String {
+        unsafe {
+            match (*ptr).obj_type {
+                ObjType::String => (*(ptr as *const ObjString)).to_string(),
+            }
+        }
+    }
+
+    pub fn eq(a: *const Self, b: *const Self) -> bool {
+        unsafe {
+            match (&(*a).obj_type, &(*b).obj_type) {
+                (ObjType::String, ObjType::String) => {
+                    let a = &*(a as *const ObjString);
+                    let b = &*(b as *const ObjString);
+                    a.as_str() == b.as_str()
+                }
+            }
         }
     }
 }
 
-impl Display for Object {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let str = match &self.inner {
-            Inner::String(ptr) => unsafe { (*ptr).to_string() },
-        };
-        write!(f, "{}", str)
-    }
-}
-
-impl PartialEq for Object {
-    fn eq(&self, other: &Self) -> bool {
-        match (&self.inner, &other.inner) {
-            (Inner::String(ptra), Inner::String(ptrb)) => unsafe {
-                let a = &**ptra;
-                let b = &**ptrb;
-                a.as_str() == b.as_str()
-            }, // _ => false
-        }
-    }
-}
-
+#[repr(C)]
 pub struct ObjString {
+    object: Object,
     len: usize,
     hash: u32,
     ptr: *const u8,
@@ -129,6 +133,7 @@ impl ObjString {
         let hash = Self::make_hash(str_ptr, len);
 
         Self {
+            object: Object::new(ObjType::String),
             len,
             hash,
             ptr: str_ptr,
@@ -161,11 +166,12 @@ impl ObjString {
         let str_ptr = unsafe {
             let str_ptr = self.alloc.allocate(Layout::array::<u8>(len).unwrap());
             ptr::copy(self.ptr, str_ptr, self.len);
-            ptr::copy(other.ptr, str_ptr.add(other.len), other.len);
+            ptr::copy(other.ptr, str_ptr.add(self.len), other.len);
             str_ptr
         };
         let hash = Self::make_hash(str_ptr, len);
         Self {
+            object: Object::new(ObjType::String),
             len,
             hash,
             ptr: str_ptr,
@@ -178,7 +184,8 @@ impl Drop for ObjString {
     fn drop(&mut self) {
         unsafe {
             let len = self.len;
-            self.alloc.dealloc(self.ptr as *mut _, Layout::array::<u8>(len).unwrap());
+            self.alloc
+                .dealloc(self.ptr as *mut _, Layout::array::<u8>(len).unwrap());
             self.ptr = ptr::null_mut();
         }
     }
