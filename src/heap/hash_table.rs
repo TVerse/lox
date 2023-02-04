@@ -25,6 +25,27 @@ impl HashTable {
         }
     }
 
+    pub(in crate::heap) fn get_string(&self, key: *const ObjString) -> Option<*const ObjString> {
+        if self.count == 0 {
+            return None;
+        }
+        unsafe {
+            let hash = (*key).hash as usize;
+            let index = hash % self.capacity;
+            for i in 0..self.capacity {
+                let entry = self.entries.add((index + i) % self.capacity);
+                if (*entry).key.is_null() {
+                    if (*entry).value == Value::Nil {
+                        return None;
+                    }
+                } else if ObjString::as_str(&*(*entry).key) == ObjString::as_str(&*key) {
+                    return Some((*entry).key);
+                }
+            }
+            unreachable!("Didn't find string in intern table")
+        }
+    }
+
     pub unsafe fn clear(&mut self) {
         if !self.entries.is_null() {
             self.alloc.dealloc(
@@ -168,6 +189,12 @@ impl HashTable {
     }
 }
 
+impl Drop for HashTable {
+    fn drop(&mut self) {
+        unsafe { self.clear() }
+    }
+}
+
 #[derive(Debug)]
 struct Entry {
     key: *const ObjString,
@@ -184,7 +211,8 @@ mod tests {
     #[test]
     fn insert() {
         let alloc = Allocator::new();
-        let heap_manager = HeapManager::new(alloc.clone());
+        let strings = HashTable::new(alloc.clone());
+        let heap_manager = HeapManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
         let key = {
             let obj = heap_manager.create_string_copied("hi!");
@@ -193,13 +221,13 @@ mod tests {
         let value = Value::Number(1.5);
         assert!(table.insert(key, value.clone()));
         assert!(!table.insert(key, value));
-        unsafe { table.clear() };
     }
 
     #[test]
     fn insert_multiple() {
         let alloc = Allocator::new();
-        let heap_manager = HeapManager::new(alloc.clone());
+        let strings = HashTable::new(alloc.clone());
+        let heap_manager = HeapManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
         let kvs: Vec<_> = (0..MAX)
             .map(|i| {
@@ -224,13 +252,13 @@ mod tests {
         for (k, v) in kvs.iter() {
             assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {}, {v}", unsafe { &**k });
         }
-        unsafe { table.clear() };
     }
 
     #[test]
     fn get() {
         let alloc = Allocator::new();
-        let heap_manager = HeapManager::new(alloc.clone());
+        let strings = HashTable::new(alloc.clone());
+        let heap_manager = HeapManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
         let obj = heap_manager.create_string_copied("hi!");
         let key = Object::as_objstring(obj).unwrap();
@@ -239,13 +267,13 @@ mod tests {
         assert!(table.insert(key, value.clone()));
         assert_eq!(table.get(key).unwrap(), &value);
         assert!(!table.insert(key, value));
-        unsafe { table.clear() };
     }
 
     #[test]
     fn delete() {
         let alloc = Allocator::new();
-        let heap_manager = HeapManager::new(alloc.clone());
+        let strings = HashTable::new(alloc.clone());
+        let heap_manager = HeapManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
         let kvs: Vec<_> = (0..MAX)
             .map(|i| {
@@ -272,6 +300,5 @@ mod tests {
         for (k, v) in kvs.iter() {
             assert_eq!(table.get(*k), None, "{k:?}, {}, {v}", unsafe { &**k });
         }
-        unsafe { table.clear() };
     }
 }

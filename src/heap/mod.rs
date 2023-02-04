@@ -1,8 +1,10 @@
 use crate::heap::allocator::Allocator;
+use crate::heap::hash_table::HashTable;
+use crate::value::Value;
 use std::alloc::Layout;
 use std::fmt::{Display, Formatter};
 use std::sync::atomic::{AtomicPtr, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::{ptr, slice};
 
 pub mod allocator;
@@ -11,13 +13,15 @@ pub mod hash_table;
 pub struct HeapManager {
     known_objects: AtomicPtr<Object>,
     alloc: Arc<Allocator>,
+    strings: Mutex<HashTable>,
 }
 
 impl HeapManager {
-    pub fn new(alloc: Arc<Allocator>) -> Arc<Self> {
+    pub fn new(alloc: Arc<Allocator>, strings: HashTable) -> Arc<Self> {
         Arc::new(Self {
             known_objects: AtomicPtr::new(ptr::null_mut()),
             alloc,
+            strings: Mutex::new(strings),
         })
     }
 
@@ -28,12 +32,26 @@ impl HeapManager {
 
     pub fn create_string_copied(&self, s: &str) -> *mut Object {
         let str = ObjString::new_copied(s, self.alloc.clone());
-        unsafe { self.move_to_heap(str) }
+        let mut strings = self.strings.lock().unwrap();
+        if let Some(ptr) = strings.get_string(&str) {
+            ptr as *mut _
+        } else {
+            let ptr = unsafe { self.move_to_heap(str) };
+            strings.insert(ptr as *const _, Value::Nil);
+            ptr
+        }
     }
 
     pub fn create_string_concat(&self, a: &ObjString, b: &ObjString) -> *mut Object {
         let str = a.concat(b);
-        unsafe { self.move_to_heap(str) }
+        let mut strings = self.strings.lock().unwrap();
+        if let Some(ptr) = strings.get_string(&str) {
+            ptr as *mut _
+        } else {
+            let ptr = unsafe { self.move_to_heap(str) };
+            strings.insert(ptr as *const _, Value::Nil);
+            ptr
+        }
     }
 
     pub unsafe fn drop_object(&self, ptr: *mut Object) {
@@ -194,5 +212,26 @@ impl Drop for ObjString {
 impl Display for ObjString {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn double_insert_string() {
+        let alloc = Allocator::new();
+        let strings = HashTable::new(alloc.clone());
+        let heap_manager = HeapManager::new(alloc, strings);
+        let a = heap_manager.create_string_copied("hi!");
+        let b = heap_manager.create_string_copied("hi!");
+        let c = heap_manager.create_string_copied("hi!hi!");
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        let d = unsafe {
+            heap_manager.create_string_concat(&*(a as *const ObjString), &*(b as *const ObjString))
+        };
+        assert_eq!(c, d);
     }
 }
