@@ -2,10 +2,10 @@ use crate::heap::allocator::Allocator;
 use crate::heap::ObjString;
 use crate::value::Value;
 use std::alloc::Layout;
+use std::fmt::{Debug, Formatter};
 use std::ptr;
 use std::sync::Arc;
 
-#[derive(Debug)]
 pub struct HashTable {
     count: usize,
     capacity: usize,
@@ -30,7 +30,7 @@ impl HashTable {
             return None;
         }
         unsafe {
-            let hash = (*key).hash as usize;
+            let hash = (*key).hash() as usize;
             let index = hash % self.capacity;
             for i in 0..self.capacity {
                 let entry = self.entries.add((index + i) % self.capacity);
@@ -195,6 +195,17 @@ impl Drop for HashTable {
     }
 }
 
+impl Debug for HashTable {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HashTable")
+            .field("count", &self.count)
+            .field("capacity", &self.capacity)
+            .field("entries", &self.entries_as_slice())
+            .field("alloc", &self.alloc)
+            .finish()
+    }
+}
+
 #[derive(Debug)]
 struct Entry {
     key: *const ObjString,
@@ -204,7 +215,7 @@ struct Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::heap::{HeapManager, Object};
+    use crate::heap::HeapManager;
 
     const MAX: usize = if cfg!(miri) { 17 } else { 2500 };
 
@@ -216,10 +227,10 @@ mod tests {
         let mut table = HashTable::new(alloc);
         let key = {
             let obj = heap_manager.create_string_copied("hi!");
-            Object::as_objstring(obj).unwrap()
+            obj.as_objstring().unwrap()
         };
         let value = Value::Number(1.5);
-        assert!(table.insert(key, value.clone()));
+        assert!(table.insert(key, value));
         assert!(!table.insert(key, value));
     }
 
@@ -233,7 +244,7 @@ mod tests {
             .map(|i| {
                 let key = {
                     let obj = heap_manager.create_string_copied(&format!("hi{i}"));
-                    Object::as_objstring(obj).unwrap()
+                    obj.as_objstring().unwrap()
                 };
                 let value = Value::Number(i as f64);
                 (key, value)
@@ -241,13 +252,9 @@ mod tests {
             .collect();
 
         for (k, v) in kvs.iter() {
-            assert!(table.insert(*k, v.clone()), "{k:?}, {}, {v}", unsafe {
-                &**k
-            });
+            assert!(table.insert(*k, *v), "{k:?}, {}, {v}", unsafe { &**k });
             assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {}, {v}", unsafe { &**k });
-            assert!(!table.insert(*k, v.clone()), "{k:?}, {}, {v}", unsafe {
-                &**k
-            });
+            assert!(!table.insert(*k, *v), "{k:?}, {}, {v}", unsafe { &**k });
         }
         for (k, v) in kvs.iter() {
             assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {}, {v}", unsafe { &**k });
@@ -261,10 +268,10 @@ mod tests {
         let mut heap_manager = HeapManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
         let obj = heap_manager.create_string_copied("hi!");
-        let key = Object::as_objstring(obj).unwrap();
+        let key = obj.as_objstring().unwrap();
         let value = Value::Number(1.5);
         assert_eq!(table.get(key), None);
-        assert!(table.insert(key, value.clone()));
+        assert!(table.insert(key, value));
         assert_eq!(table.get(key).unwrap(), &value);
         assert!(!table.insert(key, value));
     }
@@ -279,7 +286,7 @@ mod tests {
             .map(|i| {
                 let key = {
                     let obj = heap_manager.create_string_copied(&format!("hi{i}"));
-                    Object::as_objstring(obj).unwrap()
+                    obj.as_objstring().unwrap()
                 };
                 let value = Value::Number(i as f64);
                 (key, value)
@@ -287,13 +294,9 @@ mod tests {
             .collect();
 
         for (k, v) in kvs.iter() {
-            assert!(table.insert(*k, v.clone()), "{k:?}, {}, {v}", unsafe {
-                &**k
-            });
+            assert!(table.insert(*k, *v), "{k:?}, {}, {v}", unsafe { &**k });
             assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {}, {v}", unsafe { &**k });
-            assert!(!table.insert(*k, v.clone()), "{k:?}, {}, {v}", unsafe {
-                &**k
-            });
+            assert!(!table.insert(*k, *v), "{k:?}, {}, {v}", unsafe { &**k });
             assert!(table.delete(*k));
             assert_eq!(table.get(*k), None, "{k:?}, {}, {v}", unsafe { &**k });
         }

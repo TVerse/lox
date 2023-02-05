@@ -2,13 +2,14 @@ use crate::heap::allocator::Allocator;
 use crate::heap::hash_table::HashTable;
 use crate::value::Value;
 use std::alloc::Layout;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 use std::{ptr, slice};
 
 pub mod allocator;
 pub mod hash_table;
 
+#[derive(Debug)]
 pub struct HeapManager {
     known_objects: *mut Object,
     alloc: Arc<Allocator>,
@@ -30,25 +31,25 @@ impl HeapManager {
         (*object).next = old;
     }
 
-    pub fn create_string_copied(&mut self, s: &str) -> *mut Object {
+    pub fn create_string_copied(&mut self, s: &str) -> BoxedObject {
         let str = ObjString::new_copied(s, self.alloc.clone());
         if let Some(ptr) = self.strings.get_string(&str) {
-            ptr as *mut _
+            BoxedObject(ptr as *mut _)
         } else {
             let ptr = unsafe { self.move_to_heap(str) };
             self.strings.insert(ptr as *const _, Value::Nil);
-            ptr
+            BoxedObject(ptr)
         }
     }
 
-    pub fn create_string_concat(&mut self, a: &ObjString, b: &ObjString) -> *mut Object {
+    pub fn create_string_concat(&mut self, a: &ObjString, b: &ObjString) -> BoxedObject {
         let str = a.concat(b);
         if let Some(ptr) = self.strings.get_string(&str) {
-            ptr as *mut _
+            BoxedObject(ptr as *mut _)
         } else {
             let ptr = unsafe { self.move_to_heap(str) };
             self.strings.insert(ptr as *const _, Value::Nil);
-            ptr
+            BoxedObject(ptr)
         }
     }
 
@@ -82,9 +83,31 @@ impl Drop for HeapManager {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct BoxedObject(*mut Object);
+
+impl BoxedObject {
+    pub fn as_objstring(&self) -> Option<*const ObjString> {
+        Object::as_objstring(self.0 as *const _)
+    }
+}
+
+impl Display for BoxedObject {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", Object::to_string(self.0 as *const _))
+    }
+}
+
+impl PartialEq for BoxedObject {
+    fn eq(&self, other: &Self) -> bool {
+        Object::eq(self.0 as *const _, other.0 as *const _)
+    }
+}
+
 pub struct Object {
     next: *mut Object,
     obj_type: ObjType,
+    alloc: Arc<Allocator>,
 }
 
 enum ObjType {
@@ -92,14 +115,15 @@ enum ObjType {
 }
 
 impl Object {
-    fn new(typ: ObjType) -> Self {
+    fn new(typ: ObjType, alloc: Arc<Allocator>) -> Self {
         Self {
             next: ptr::null_mut(),
             obj_type: typ,
+            alloc,
         }
     }
 
-    pub fn as_objstring(ptr: *const Self) -> Option<*const ObjString> {
+    fn as_objstring(ptr: *const Self) -> Option<*const ObjString> {
         unsafe {
             match (*ptr).obj_type {
                 ObjType::String => Some(ptr as *const ObjString),
@@ -107,7 +131,7 @@ impl Object {
         }
     }
 
-    pub fn to_string(ptr: *const Self) -> String {
+    fn to_string(ptr: *const Self) -> String {
         unsafe {
             match (*ptr).obj_type {
                 ObjType::String => (*(ptr as *const ObjString)).to_string(),
@@ -115,7 +139,7 @@ impl Object {
         }
     }
 
-    pub fn eq(a: *const Self, b: *const Self) -> bool {
+    fn eq(a: *const Self, b: *const Self) -> bool {
         unsafe {
             match (&(*a).obj_type, &(*b).obj_type) {
                 (ObjType::String, ObjType::String) => a == b,
@@ -127,10 +151,13 @@ impl Object {
 #[repr(C)]
 pub struct ObjString {
     object: Object,
+    internal: ObjStringInternal,
+}
+
+struct ObjStringInternal {
     len: usize,
     hash: u32,
     ptr: *const u8,
-    alloc: Arc<Allocator>,
 }
 
 impl ObjString {
@@ -145,23 +172,24 @@ impl ObjString {
         let hash = Self::make_hash(str_ptr, len);
 
         Self {
-            object: Object::new(ObjType::String),
-            len,
-            hash,
-            ptr: str_ptr,
-            alloc,
+            object: Object::new(ObjType::String, alloc),
+            internal: ObjStringInternal {
+                len,
+                hash,
+                ptr: str_ptr,
+            },
         }
     }
 
     pub fn as_str(&self) -> &str {
         unsafe {
-            let slice = slice::from_raw_parts(self.ptr, self.len);
+            let slice = slice::from_raw_parts(self.internal.ptr, self.internal.len);
             std::str::from_utf8_unchecked(slice)
         }
     }
 
     pub fn hash(&self) -> u32 {
-        self.hash
+        self.internal.hash
     }
 
     fn make_hash(chars: *const u8, len: usize) -> u32 {
@@ -174,20 +202,28 @@ impl ObjString {
     }
 
     fn concat(&self, other: &ObjString) -> Self {
-        let len = self.len + other.len;
+        let len = self.internal.len + other.internal.len;
         let str_ptr = unsafe {
-            let str_ptr = self.alloc.allocate(Layout::array::<u8>(len).unwrap());
-            ptr::copy(self.ptr, str_ptr, self.len);
-            ptr::copy(other.ptr, str_ptr.add(self.len), other.len);
+            let str_ptr = self
+                .object
+                .alloc
+                .allocate(Layout::array::<u8>(len).unwrap());
+            ptr::copy(self.internal.ptr, str_ptr, self.internal.len);
+            ptr::copy(
+                other.internal.ptr,
+                str_ptr.add(self.internal.len),
+                other.internal.len,
+            );
             str_ptr
         };
         let hash = Self::make_hash(str_ptr, len);
         Self {
-            object: Object::new(ObjType::String),
-            len,
-            hash,
-            ptr: str_ptr,
-            alloc: self.alloc.clone(),
+            object: Object::new(ObjType::String, self.object.alloc.clone()),
+            internal: ObjStringInternal {
+                len,
+                hash,
+                ptr: str_ptr,
+            },
         }
     }
 }
@@ -195,10 +231,12 @@ impl ObjString {
 impl Drop for ObjString {
     fn drop(&mut self) {
         unsafe {
-            let len = self.len;
-            self.alloc
-                .dealloc(self.ptr as *mut _, Layout::array::<u8>(len).unwrap());
-            self.ptr = ptr::null_mut();
+            let len = self.internal.len;
+            self.object.alloc.dealloc(
+                self.internal.ptr as *mut _,
+                Layout::array::<u8>(len).unwrap(),
+            );
+            self.internal.ptr = ptr::null_mut();
         }
     }
 }
@@ -224,7 +262,8 @@ mod tests {
         assert_eq!(a, b);
         assert_ne!(a, c);
         let d = unsafe {
-            heap_manager.create_string_concat(&*(a as *const ObjString), &*(b as *const ObjString))
+            heap_manager
+                .create_string_concat(&*(a.0 as *const ObjString), &*(b.0 as *const ObjString))
         };
         assert_eq!(c, d);
     }

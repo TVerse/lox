@@ -23,6 +23,9 @@ pub enum Opcode {
     Less,
     Print,
     Pop,
+    DefineGlobal,
+    GetGlobal,
+    SetGlobal,
 }
 
 impl Opcode {
@@ -69,8 +72,7 @@ impl Chunk {
                 .constants
                 .iter()
                 .enumerate()
-                .find(|(_, c)| *c == &value)
-                .map(|(idx, _)| idx);
+                .find_map(|(idx, c)| (*c == value).then_some(idx));
             if let Some(idx) = existing_index {
                 Some(idx as u8)
             } else {
@@ -148,7 +150,10 @@ impl Chunk {
                     | Opcode::Less
                     | Opcode::Print
                     | Opcode::Pop => simple_instruction(opcode),
-                    Opcode::Constant => self.constant_instruction(opcode, iter.next().map(code)),
+                    Opcode::Constant
+                    | Opcode::DefineGlobal
+                    | Opcode::GetGlobal
+                    | Opcode::SetGlobal => self.constant_instruction(opcode, iter.next().map(code)),
                 }
             } else {
                 format!("Unknown opcode 0x{opcode:02x}")

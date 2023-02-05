@@ -82,8 +82,28 @@ impl<'a, 'b> Compiler<'a, 'b> {
         }
     }
 
+    fn next_token(&mut self) -> CompileResult<Token> {
+        match self.iter.next() {
+            Some(token) => match token {
+                Ok(token) => Ok(token),
+                Err(e) => Err(CompileError::ScanError(e).into()),
+            },
+            None => Err(CompileError::GeneralError("Unexpected end of stream".to_string()).into()),
+        }
+    }
+
+    fn peek_token(&mut self) -> CompileResult<&Token> {
+        match self.iter.peek() {
+            Some(token) => match token {
+                Ok(token) => Ok(token),
+                Err(e) => Err(CompileError::ScanError(e.clone()).into()),
+            },
+            None => Err(CompileError::GeneralError("Unexpected end of stream".to_string()).into()),
+        }
+    }
+
     fn compile(&mut self) -> CompileResult<()> {
-        while self.iter.peek().is_some() {
+        while let Some(Ok(_)) = self.iter.peek() {
             self.declaration()?;
         }
 
@@ -95,7 +115,14 @@ impl<'a, 'b> Compiler<'a, 'b> {
     }
 
     fn declaration(&mut self) -> CompileResult<()> {
-        if let Err(e) = self.statement() {
+        let contents = &self.iter.peek().unwrap().as_ref().unwrap().contents;
+        let result = if *contents == TokenContents::Var {
+            let _ = self.iter.next();
+            self.var_declaration()
+        } else {
+            self.statement()
+        };
+        if let Err(e) = result {
             self.synchronize(e);
         }
         Ok(())
@@ -123,47 +150,107 @@ impl<'a, 'b> Compiler<'a, 'b> {
         }
     }
 
-    fn statement(&mut self) -> CompileResult<()> {
+    fn var_declaration(&mut self) -> CompileResult<()> {
         let mut errors = CompileErrors::new();
-        let token = self.iter.peek().unwrap();
-        match token {
-            Ok(token) => {
-                let line = token.line;
-                match token.contents {
-                    TokenContents::Print => {
-                        let _ = self.iter.next().unwrap().unwrap();
-                        self.expression()?;
-                        if let Some(Ok(Token {
-                            contents: TokenContents::Semicolon,
-                            line,
-                        })) = self.iter.next()
-                        {
-                            self.chunk.add_opcode(Opcode::Print, line);
-                            Ok(())
-                        } else {
+        let constant_index = self.parse_variable()?;
+        if let Some(Ok(token)) = self.iter.peek() {
+            match token.contents {
+                TokenContents::Equal => {
+                    let _ = self.iter.next();
+                    self.expression()?
+                }
+                _ => self.chunk.add_opcode(Opcode::Nil, token.line),
+            }
+        }
+        if let Some(Ok(Token {
+            contents: TokenContents::Semicolon,
+            line,
+        })) = self.iter.next()
+        {
+            self.define_variable(constant_index, line)
+        } else {
+            errors.push(CompileError::GeneralError(
+                "Missing semicolon after variable declaration".to_string(),
+            ));
+            Err(errors)
+        }
+    }
+
+    fn parse_variable(&mut self) -> CompileResult<u8> {
+        let mut errors = CompileErrors::new();
+        match self.iter.next() {
+            Some(token) => match token {
+                Ok(token) => {
+                    let line = token.line;
+                    match token.contents {
+                        TokenContents::Identifier(id) => self.identifier_constant(id),
+                        _ => {
                             errors.push(CompileError::GeneralError(format!(
-                                "Missing semicolon around line {}",
-                                line
+                                "Expected identifier after 'var' on line {line}"
                             )));
                             Err(errors)
                         }
                     }
-                    _ => self.expression_statement(line),
                 }
-            }
-            Err(e) => {
-                errors.push(e.clone().into());
+                Err(e) => {
+                    errors.push(e.into());
+                    Err(errors)
+                }
+            },
+            None => {
+                errors.push(CompileError::GeneralError(
+                    "Unexpected end of stream after 'var' declaration".to_string(),
+                ));
                 Err(errors)
             }
         }
     }
 
+    fn identifier_constant(&mut self, id: &str) -> CompileResult<u8> {
+        self.chunk
+            .add_constant(Value::Obj(self.heap_manager.create_string_copied(id)))
+            .ok_or_else(|| CompileErrors::from(CompileError::TooManyConstants))
+    }
+
+    fn define_variable(&mut self, idx: u8, line: usize) -> CompileResult<()> {
+        self.chunk
+            .add_opcode_and_operand(Opcode::DefineGlobal, idx, line);
+        Ok(())
+    }
+
+    fn statement(&mut self) -> CompileResult<()> {
+        let mut errors = CompileErrors::new();
+        let token = self.peek_token()?;
+        let line = token.line;
+        match token.contents {
+            TokenContents::Print => {
+                let _ = self.next_token();
+                self.expression()?;
+                if let Some(Ok(Token {
+                    contents: TokenContents::Semicolon,
+                    line,
+                })) = self.iter.next()
+                {
+                    self.chunk.add_opcode(Opcode::Print, line);
+                    Ok(())
+                } else {
+                    errors.push(CompileError::GeneralError(format!(
+                        "Missing semicolon around line {}",
+                        line
+                    )));
+                    Err(errors)
+                }
+            }
+            _ => self.expression_statement(line),
+        }
+    }
+
     fn expression_statement(&mut self, estimated_line: usize) -> CompileResult<()> {
         self.expression()?;
-        if let Some(Ok(Token {
+        if let Ok(Token {
             contents: TokenContents::Semicolon,
             line,
-        })) = self.iter.next()
+        }) = self.next_token()
         {
             self.chunk.add_opcode(Opcode::Pop, line);
             Ok(())
@@ -187,7 +274,8 @@ impl<'a, 'b> Compiler<'a, 'b> {
             match token {
                 Ok(token) => {
                     if let Some((prefix_rule, _)) = get_parser(&token, OperatorType::Prefix) {
-                        if let Err(e) = prefix_rule(self, &token) {
+                        let can_assign = min_bp <= BindingPower::Assignment;
+                        if let Err(e) = prefix_rule(self, &token, can_assign) {
                             errors.extend(e);
                         }
                     } else {
@@ -213,8 +301,17 @@ impl<'a, 'b> Compiler<'a, 'b> {
                         }
                         let token = self.iter.next().unwrap().unwrap();
 
-                        if let Err(e) = infix_rule(self, &token) {
+                        let can_assign = min_bp <= BindingPower::Assignment;
+                        if let Err(e) = infix_rule(self, &token, can_assign) {
                             errors.extend(e);
+                        }
+                        let peek = self.peek_token()?;
+                        if can_assign && peek.contents == TokenContents::Equal {
+                            errors.push(CompileError::GeneralError(format!(
+                                "Found invalid = around line {}",
+                                peek.line
+                            )));
+                            break;
                         }
                     } else {
                         break;
@@ -234,71 +331,51 @@ impl<'a, 'b> Compiler<'a, 'b> {
         }
     }
 
-    fn parse_unary(&mut self, token: &Token) -> CompileResult<()> {
+    fn parse_unary(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
         self.expression_bp(BindingPower::Unary)?;
         match token.contents {
             TokenContents::Minus => self.chunk.add_opcode(Opcode::Negate, token.line),
             TokenContents::Bang => self.chunk.add_opcode(Opcode::Not, token.line),
-            _ => {
-                return Err(CompileError::GeneralError(format!(
-                    "Unexpected unary token, got {token:?}"
-                ))
-                .into());
-            }
+            _ => unreachable!("Unexpected unary token, got {token:?}"),
         }
         Ok(())
     }
 
-    fn parse_number(&mut self, token: &Token) -> CompileResult<()> {
+    fn parse_number(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
         let number: f64 = match &token.contents {
             TokenContents::Number(number) => number.parse().expect("Could not parse number"),
-            _ => {
-                return Err(CompileError::GeneralError(format!(
-                    "Expected number, got token {token:?}"
-                ))
-                .into());
-            }
+            _ => unreachable!("Expected number, got token {token:?}"),
         };
         let constant = self
             .chunk
             .add_constant(Value::Number(number))
-            .ok_or(CompileError::TooManyConstants)?;
+            .ok_or_else(|| CompileErrors::from(CompileError::TooManyConstants))?;
         self.chunk
             .add_opcode_and_operand(Opcode::Constant, constant, token.line);
         Ok(())
     }
 
-    fn parse_term(&mut self, token: &Token) -> CompileResult<()> {
+    fn parse_term(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
         self.expression_bp(BindingPower::Term)?;
         match token.contents {
             TokenContents::Plus => self.chunk.add_opcode(Opcode::Add, token.line),
             TokenContents::Minus => self.chunk.add_opcode(Opcode::Subtract, token.line),
-            _ => {
-                return Err(CompileError::GeneralError(format!(
-                    "Unexpected term token, got {token:?}"
-                ))
-                .into());
-            }
+            _ => unreachable!("Unexpected term token, got {token:?}"),
         }
         Ok(())
     }
 
-    fn parse_factor(&mut self, token: &Token) -> CompileResult<()> {
+    fn parse_factor(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
         self.expression_bp(BindingPower::Factor)?;
         match token.contents {
             TokenContents::Asterisk => self.chunk.add_opcode(Opcode::Multiply, token.line),
             TokenContents::Slash => self.chunk.add_opcode(Opcode::Divide, token.line),
-            _ => {
-                return Err(CompileError::GeneralError(format!(
-                    "Unexpected term token, got {token:?}"
-                ))
-                .into());
-            }
+            _ => unreachable!("Unexpected term token, got {token:?}"),
         }
         Ok(())
     }
 
-    fn parse_grouping(&mut self, _token: &Token) -> CompileResult<()> {
+    fn parse_grouping(&mut self, _token: &Token, _can_assign: bool) -> CompileResult<()> {
         self.expression_bp(BindingPower::None)?;
         match self.iter.next() {
             Some(Ok(token)) => match token.contents {
@@ -319,22 +396,17 @@ impl<'a, 'b> Compiler<'a, 'b> {
         Ok(())
     }
 
-    fn parse_literal(&mut self, token: &Token) -> CompileResult<()> {
+    fn parse_literal(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
         match token.contents {
             TokenContents::True => self.chunk.add_opcode(Opcode::True, token.line),
             TokenContents::False => self.chunk.add_opcode(Opcode::False, token.line),
             TokenContents::Nil => self.chunk.add_opcode(Opcode::Nil, token.line),
-            _ => {
-                return Err(CompileError::GeneralError(format!(
-                    "Unexpected term token, got {token:?}"
-                ))
-                .into());
-            }
+            _ => unreachable!("Unexpected literal token, got {token:?}"),
         }
         Ok(())
     }
 
-    fn parse_equality(&mut self, token: &Token) -> CompileResult<()> {
+    fn parse_equality(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
         self.expression_bp(BindingPower::Equality)?;
         match token.contents {
             TokenContents::EqualEqual => self.chunk.add_opcode(Opcode::Equal, token.line),
@@ -342,17 +414,12 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 self.chunk.add_opcode(Opcode::Equal, token.line);
                 self.chunk.add_opcode(Opcode::Not, token.line);
             }
-            _ => {
-                return Err(CompileError::GeneralError(format!(
-                    "Unexpected equality token, got {token:?}"
-                ))
-                .into());
-            }
+            _ => unreachable!("Unexpected equality token, got {token:?}"),
         }
         Ok(())
     }
 
-    fn parse_comparison(&mut self, token: &Token) -> CompileResult<()> {
+    fn parse_comparison(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
         self.expression_bp(BindingPower::Comparison)?;
         match token.contents {
             TokenContents::Greater => self.chunk.add_opcode(Opcode::Greater, token.line),
@@ -365,33 +432,41 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 self.chunk.add_opcode(Opcode::Greater, token.line);
                 self.chunk.add_opcode(Opcode::Not, token.line);
             }
-            _ => {
-                return Err(CompileError::GeneralError(format!(
-                    "Unexpected equality token, got {token:?}"
-                ))
-                .into());
-            }
+            _ => unreachable!("Unexpected comparison token, got {token:?}"),
         }
         Ok(())
     }
 
-    fn parse_string(&mut self, token: &Token) -> CompileResult<()> {
+    fn parse_string(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
         match token.contents {
             TokenContents::String(s) => {
-                let value = Value::Obj(self.heap_manager.create_string_copied(s) as *mut _);
+                let value = Value::Obj(self.heap_manager.create_string_copied(s));
                 let constant = self
                     .chunk
                     .add_constant(value)
-                    .ok_or(CompileError::TooManyConstants)?;
+                    .ok_or_else(|| CompileErrors::from(CompileError::TooManyConstants))?;
                 self.chunk
                     .add_opcode_and_operand(Opcode::Constant, constant, token.line)
             }
-            _ => {
-                return Err(CompileError::GeneralError(format!(
-                    "Unexpected string token, got {token:?}"
-                ))
-                .into());
+            _ => unreachable!("Unexpected string token, got {token:?}"),
+        }
+        Ok(())
+    }
+
+    fn parse_identifier(&mut self, token: &Token, can_assign: bool) -> CompileResult<()> {
+        match token.contents {
+            TokenContents::Identifier(id) => {
+                let idx = self.identifier_constant(id)?;
+                if self.peek_token()?.contents == TokenContents::Equal && can_assign {
+                    self.next_token()?;
+                    self.expression()?;
+                    self.chunk
+                        .add_opcode_and_operand(Opcode::SetGlobal, idx, token.line);
+                }
+                self.chunk
+                    .add_opcode_and_operand(Opcode::GetGlobal, idx, token.line);
             }
+            _ => unreachable!("Unexpected identifier token, got {token:?}"),
         }
         Ok(())
     }
@@ -433,6 +508,9 @@ fn get_parser<'a, 'b, 'c>(
         (TokenContents::String(_), OperatorType::Prefix) => {
             Some((Compiler::parse_string, BindingPower::None))
         }
+        (TokenContents::Identifier(_), OperatorType::Prefix) => {
+            Some((Compiler::parse_identifier, BindingPower::None))
+        }
         _ => None,
     }
 }
@@ -443,7 +521,7 @@ enum OperatorType {
     Infix,
 }
 
-type Parser<'a, 'b, 'c> = fn(&'c mut Compiler<'a, 'b>, &'c Token<'b>) -> CompileResult<()>;
+type Parser<'a, 'b, 'c> = fn(&'c mut Compiler<'a, 'b>, &'c Token<'b>, bool) -> CompileResult<()>;
 
 #[derive(Error, Debug, Clone)]
 pub struct CompileErrors {

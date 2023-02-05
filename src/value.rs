@@ -1,12 +1,12 @@
-use crate::heap::Object;
+use crate::heap::BoxedObject;
 use std::fmt::{Display, Formatter};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Value {
     Number(f64),
     Boolean(bool),
     Nil,
-    Obj(*mut Object),
+    Obj(BoxedObject),
 }
 
 impl PartialEq for Value {
@@ -14,9 +14,7 @@ impl PartialEq for Value {
         match (self, other) {
             (Value::Number(a), Value::Number(b)) => a == b,
             (Value::Boolean(a), Value::Boolean(b)) => a == b,
-            (Value::Obj(ptra), Value::Obj(ptrb)) => {
-                Object::eq(*ptra as *const _, *ptrb as *const _)
-            }
+            (Value::Obj(a), Value::Obj(b)) => a == b,
             (Value::Nil, Value::Nil) => true,
             _ => false,
         }
@@ -38,7 +36,7 @@ impl Display for Value {
                 Value::Number(num) => num.to_string(),
                 Value::Boolean(bool) => bool.to_string(),
                 Value::Nil => "nil".to_string(),
-                Value::Obj(object) => Object::to_string(*object as *const _),
+                Value::Obj(object) => object.to_string(),
             }
         )
     }
