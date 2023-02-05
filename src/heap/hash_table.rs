@@ -1,9 +1,8 @@
 use crate::heap::allocator::Allocator;
-use crate::heap::ObjString;
+use crate::heap::{BoxedObjString, ObjString};
 use crate::value::Value;
 use std::alloc::Layout;
 use std::fmt::{Debug, Formatter};
-use std::ptr;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
@@ -26,23 +25,18 @@ impl HashTable {
         }
     }
 
-    pub(in crate::heap) fn get_string(
-        &self,
-        key: NonNull<ObjString>,
-    ) -> Option<NonNull<ObjString>> {
+    pub(in crate::heap) fn get_string(&self, key: NonNull<ObjString>) -> Option<BoxedObjString> {
         if self.count == 0 {
             return None;
         }
         unsafe {
-            let hash = (*key.as_ptr()).hash() as usize;
+            let hash = ObjString::hash(key) as usize;
             let index = hash % self.capacity;
             for i in 0..self.capacity {
                 let entry = self.entries.as_ptr().add((index + i) % self.capacity);
-                match NonNull::new((*entry).key as *mut _) {
+                match (*entry).key {
                     Some(entry_key) => {
-                        if ObjString::as_str(&*entry_key.as_ptr())
-                            == ObjString::as_str(&*key.as_ptr())
-                        {
+                        if entry_key.as_str() == ObjString::as_str(key) {
                             return Some(entry_key);
                         }
                     }
@@ -68,13 +62,13 @@ impl HashTable {
         self.capacity = 0;
     }
 
-    pub fn get(&self, key: NonNull<ObjString>) -> Option<&Value> {
-        if self.capacity == 0 {
+    pub fn get(&self, key: BoxedObjString) -> Option<&Value> {
+        if self.count == 0 {
             return None;
         }
-        let entry = Self::find_entry(self.entries, key, self.capacity);
+        let entry = Self::find_entry(self.entries, key.0, self.capacity);
         unsafe {
-            if !(*entry.as_ptr()).key.is_null() {
+            if (*entry.as_ptr()).key.is_some() {
                 let entry = &*(entry.as_ptr());
                 Some(&entry.value)
             } else {
@@ -84,18 +78,18 @@ impl HashTable {
     }
 
     // TODO Option<Value>
-    pub fn delete(&mut self, key: NonNull<ObjString>) -> bool {
+    pub fn delete(&mut self, key: BoxedObjString) -> bool {
         if self.count == 0 {
             return false;
         }
 
         unsafe {
-            let entry = Self::find_entry(self.entries, key, self.capacity);
-            if (*entry.as_ptr()).key.is_null() {
+            let entry = Self::find_entry(self.entries, key.0, self.capacity);
+            if (*entry.as_ptr()).key.is_none() {
                 return false;
             }
             entry.as_ptr().write(Entry {
-                key: ptr::null_mut(),
+                key: None,
                 value: Value::Boolean(true),
             });
             true
@@ -103,20 +97,19 @@ impl HashTable {
     }
 
     // TODO Option<Value>
-    pub fn insert(&mut self, key: NonNull<ObjString>, value: Value) -> bool {
+    pub fn insert(&mut self, key: BoxedObjString, value: Value) -> bool {
         if (self.count + 1) as f64 > (self.capacity as f64) * Self::MAX_LOAD {
             let new_capacity = self.grow_capacity();
             self.adjust_capacity(new_capacity)
         }
-
-        let entry = Self::find_entry(self.entries, key, self.capacity);
+        let entry = Self::find_entry(self.entries, key.0, self.capacity);
         unsafe {
-            let is_new_key = (*entry.as_ptr()).key.is_null();
+            let is_new_key = (*entry.as_ptr()).key.is_none();
             if is_new_key {
                 self.count += 1;
             }
 
-            (*entry.as_ptr()).key = key.as_ptr();
+            (*entry.as_ptr()).key = Some(key);
             (*entry.as_ptr()).value = value;
 
             is_new_key
@@ -143,7 +136,7 @@ impl HashTable {
                 .cast::<Entry>();
             for i in 0..new_capacity {
                 let entry = Entry {
-                    key: ptr::null_mut(),
+                    key: None,
                     value: Value::Nil,
                 };
                 entries.as_ptr().add(i).write(entry)
@@ -152,13 +145,10 @@ impl HashTable {
             self.count = 0;
             for i in 0..self.capacity {
                 let source = self.entries.as_ptr().add(i).read();
-                match NonNull::new(source.key as *mut _) {
-                    Some(key) => {
-                        let dest = Self::find_entry(entries, key, new_capacity);
-                        dest.as_ptr().write(source);
-                        self.count += 1;
-                    }
-                    None => continue,
+                if let Some(key) = source.key {
+                    let dest = Self::find_entry(entries, key.0, new_capacity);
+                    dest.as_ptr().write(source);
+                    self.count += 1;
                 }
             }
 
@@ -180,23 +170,28 @@ impl HashTable {
         capacity: usize,
     ) -> NonNull<Entry> {
         unsafe {
-            let hash = (*key.as_ptr()).hash() as usize;
+            let hash = ObjString::hash(key) as usize;
             let index = hash % capacity;
             let mut tombstone: Option<NonNull<Entry>> = None;
             for i in 0..capacity {
                 let entry = NonNull::new_unchecked(entries.as_ptr().add((index + i) % capacity));
-                if (*entry.as_ptr()).key.is_null() {
-                    if (*entry.as_ptr()).value == Value::Nil {
-                        return if let Some(tombstone) = tombstone {
-                            tombstone
-                        } else {
-                            entry
-                        };
-                    } else if tombstone.is_none() {
-                        tombstone = Some(entry)
+                match (*entry.as_ptr()).key {
+                    None => {
+                        if (*entry.as_ptr()).value == Value::Nil {
+                            return if let Some(tombstone) = tombstone {
+                                tombstone
+                            } else {
+                                entry
+                            };
+                        } else if tombstone.is_none() {
+                            tombstone = Some(entry)
+                        }
                     }
-                } else if (*entry.as_ptr()).key == key.as_ptr() {
-                    return entry;
+                    Some(entry_key) => {
+                        if entry_key.0 == key {
+                            return entry;
+                        }
+                    }
                 }
             }
             unreachable!(
@@ -224,10 +219,19 @@ impl Debug for HashTable {
     }
 }
 
-#[derive(Debug)]
 struct Entry {
-    key: *const ObjString,
+    key: Option<BoxedObjString>,
     value: Value,
+}
+
+impl Debug for Entry {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Entry")
+            .field("key", &self.key)
+            .field("value", &self.value)
+            .field("key_val", &self.key.map(|k| ObjString::as_str(k.0)))
+            .finish()
+    }
 }
 
 #[cfg(test)]
@@ -248,8 +252,8 @@ mod tests {
             obj.as_objstring().unwrap()
         };
         let value = Value::Number(1.5);
-        assert!(table.insert(key.0, value));
-        assert!(!table.insert(key.0, value));
+        assert!(table.insert(key, value));
+        assert!(!table.insert(key, value));
     }
 
     #[test]
@@ -270,20 +274,12 @@ mod tests {
             .collect();
 
         for (k, v) in kvs.iter() {
-            assert!(table.insert(k.0, *v), "{k:?}, {}, {v}", unsafe {
-                &*k.0.as_ptr()
-            });
-            assert_eq!(table.get(k.0).unwrap(), v, "{k:?}, {}, {v}", unsafe {
-                &*k.0.as_ptr()
-            });
-            assert!(!table.insert(k.0, *v), "{k:?}, {}, {v}", unsafe {
-                &*k.0.as_ptr()
-            });
+            assert!(table.insert(*k, *v), "{k:?}, {k}, {v}");
+            assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {k}, {v}");
+            assert!(!table.insert(*k, *v), "{k:?}, {k}, {v}");
         }
         for (k, v) in kvs.iter() {
-            assert_eq!(table.get(k.0).unwrap(), v, "{k:?}, {}, {v}", unsafe {
-                &*k.0.as_ptr()
-            });
+            assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {k}, {v}");
         }
     }
 
@@ -296,10 +292,12 @@ mod tests {
         let obj = heap_manager.create_string_copied("hi!");
         let key = obj.as_objstring().unwrap();
         let value = Value::Number(1.5);
-        assert_eq!(table.get(key.0), None);
-        assert!(table.insert(key.0, value));
-        assert_eq!(table.get(key.0).unwrap(), &value);
-        assert!(!table.insert(key.0, value));
+        assert_eq!(table.get(key), None);
+        dbg!(&table);
+        assert!(table.insert(key, value));
+        dbg!(&table);
+        assert_eq!(table.get(key).unwrap(), &value);
+        assert!(!table.insert(key, value));
     }
 
     #[test]
@@ -320,24 +318,14 @@ mod tests {
             .collect();
 
         for (k, v) in kvs.iter() {
-            assert!(table.insert(k.0, *v), "{k:?}, {}, {v}", unsafe {
-                &*k.0.as_ptr()
-            });
-            assert_eq!(table.get(k.0).unwrap(), v, "{k:?}, {}, {v}", unsafe {
-                &*k.0.as_ptr()
-            });
-            assert!(!table.insert(k.0, *v), "{k:?}, {}, {v}", unsafe {
-                &*k.0.as_ptr()
-            });
-            assert!(table.delete(k.0));
-            assert_eq!(table.get(k.0), None, "{k:?}, {}, {v}", unsafe {
-                &*k.0.as_ptr()
-            });
+            assert!(table.insert(*k, *v), "{k:?}, {k}, {v}");
+            assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {k}, {v}");
+            assert!(!table.insert(*k, *v), "{k:?}, {k}, {v}");
+            assert!(table.delete(*k));
+            assert_eq!(table.get(*k), None, "{k:?}, {k}, {v}");
         }
         for (k, v) in kvs.iter() {
-            assert_eq!(table.get(k.0), None, "{k:?}, {}, {v}", unsafe {
-                &*k.0.as_ptr()
-            });
+            assert_eq!(table.get(*k), None, "{k:?}, {k}, {v}");
         }
     }
 }

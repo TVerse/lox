@@ -106,7 +106,7 @@ impl<'a, W: Write> VM<'a, W> {
                         Value::Obj(obj) => {
                             if let Some(s) = obj.as_objstring() {
                                 let value = self.peek(0)?;
-                                self.globals.insert(s.0, *value);
+                                self.globals.insert(s, *value);
                                 let _ = self.pop();
                             } else {
                                 return Err(IncorrectInvariantError::InvalidTypes.into());
@@ -120,7 +120,7 @@ impl<'a, W: Write> VM<'a, W> {
                     match name {
                         Value::Obj(obj) => {
                             if let Some(s) = obj.as_objstring() {
-                                if let Some(v) = self.globals.get(s.0) {
+                                if let Some(v) = self.globals.get(s) {
                                     self.push(*v)?;
                                 } else {
                                     return Err(
@@ -139,8 +139,8 @@ impl<'a, W: Write> VM<'a, W> {
                     match name {
                         Value::Obj(obj) => {
                             if let Some(s) = obj.as_objstring() {
-                                if self.globals.insert(s.0, *self.peek(0)?) {
-                                    self.globals.delete(s.0);
+                                if self.globals.insert(s, *self.peek(0)?) {
+                                    self.globals.delete(s);
                                     return Err(
                                         RuntimeError::UndefinedVariable(obj.to_string()).into()
                                     );

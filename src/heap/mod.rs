@@ -42,10 +42,10 @@ impl HeapManager {
     pub fn create_string_copied(&mut self, s: &str) -> BoxedObject {
         let str = ObjString::new_copied(s, self.alloc.clone());
         if let Some(ptr) = self.strings.get_string(NonNull::from(&str)) {
-            BoxedObject(ptr.cast::<Object>())
+            BoxedObject(ptr.0.cast::<Object>())
         } else {
             let ptr = unsafe { self.move_to_heap(str) };
-            self.strings.insert(ptr, Value::Nil);
+            self.strings.insert(BoxedObjString(ptr), Value::Nil);
             BoxedObject(ptr.cast::<Object>())
         }
     }
@@ -53,10 +53,10 @@ impl HeapManager {
     pub fn create_string_concat(&mut self, a: &BoxedObjString, b: &BoxedObjString) -> BoxedObject {
         let str = ObjString::concat(a.0, b.0);
         if let Some(ptr) = self.strings.get_string(NonNull::from(&str)) {
-            BoxedObject(ptr.cast::<Object>())
+            BoxedObject(ptr.0.cast::<Object>())
         } else {
             let ptr = unsafe { self.move_to_heap(str) };
-            self.strings.insert(ptr, Value::Nil);
+            self.strings.insert(BoxedObjString(ptr), Value::Nil);
             BoxedObject(ptr.cast::<Object>())
         }
     }
@@ -141,7 +141,7 @@ impl Object {
     fn to_string(ptr: NonNull<Self>) -> String {
         unsafe {
             match (*ptr.as_ptr()).obj_type {
-                ObjType::String => (*(ptr.cast::<ObjString>().as_ptr())).to_string(),
+                ObjType::String => (BoxedObjString(ptr.cast::<ObjString>())).to_string(),
             }
         }
     }
@@ -156,7 +156,19 @@ impl Object {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct BoxedObjString(pub NonNull<ObjString>);
+pub struct BoxedObjString(NonNull<ObjString>);
+
+impl BoxedObjString {
+    pub fn as_str<'a>(&'a self) -> &'a str {
+        ObjString::as_str::<'a>(self.0)
+    }
+}
+
+impl Display for BoxedObjString {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
 
 #[repr(C)]
 pub struct ObjString {
@@ -191,16 +203,18 @@ impl ObjString {
         }
     }
 
-    pub fn as_str(&self) -> &str {
+    pub fn as_str<'a>(ptr: NonNull<Self>) -> &'a str {
         unsafe {
-            let slice =
-                slice::from_raw_parts(self.internal.ptr.as_ptr() as *const _, self.internal.len);
+            let slice = slice::from_raw_parts(
+                (*ptr.as_ptr()).internal.ptr.as_ptr() as *const _,
+                (*ptr.as_ptr()).internal.len,
+            );
             std::str::from_utf8_unchecked(slice)
         }
     }
 
-    pub fn hash(&self) -> u32 {
-        self.internal.hash
+    pub fn hash(ptr: NonNull<Self>) -> u32 {
+        unsafe { (*ptr.as_ptr()).internal.hash }
     }
 
     fn make_hash(chars: NonNull<u8>, len: usize) -> u32 {
@@ -247,12 +261,6 @@ impl Drop for ObjString {
                 .dealloc(self.internal.ptr, Layout::array::<u8>(len).unwrap());
             self.internal.ptr = NonNull::dangling();
         }
-    }
-}
-
-impl Display for ObjString {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
     }
 }
 
