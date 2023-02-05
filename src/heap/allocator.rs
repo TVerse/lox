@@ -34,7 +34,7 @@ impl Allocator {
 
     pub unsafe fn realloc(
         &self,
-        old_ptr: *mut u8,
+        old_ptr: NonNull<u8>,
         old_layout: Layout,
         new_layout: Layout,
     ) -> NonNull<u8> {
@@ -43,7 +43,7 @@ impl Allocator {
             "Realloc can't shrink allocations"
         );
         let diff = new_layout.size() - old_layout.size();
-        let ptr = realloc(old_ptr, old_layout, new_layout.size());
+        let ptr = realloc(old_ptr.as_ptr(), old_layout, new_layout.size());
         match NonNull::new(ptr) {
             Some(ptr) => {
                 self.allocated.fetch_add(diff, Ordering::Relaxed);
@@ -58,9 +58,9 @@ impl Allocator {
         }
     }
 
-    pub unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+    pub unsafe fn dealloc(&self, ptr: NonNull<u8>, layout: Layout) {
         self.allocated.fetch_sub(layout.size(), Ordering::Relaxed);
-        dealloc(ptr, layout);
+        dealloc(ptr.as_ptr(), layout);
         trace!(
             "Deallocated {} bytes for a new total of {}",
             layout.size(),

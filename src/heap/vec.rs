@@ -61,7 +61,7 @@ impl<T> Vec<T> {
         } else {
             let old_layout = Layout::array::<T>(self.cap).unwrap();
             let old_ptr = self.ptr.cast();
-            unsafe { self.alloc.realloc(old_ptr.as_ptr(), old_layout, new_layout) }
+            unsafe { self.alloc.realloc(old_ptr, old_layout, new_layout) }
         };
         self.ptr = new_ptr.cast::<T>();
         self.cap = new_cap;
@@ -71,9 +71,9 @@ impl<T> Vec<T> {
 impl<T> Drop for Vec<T> {
     fn drop(&mut self) {
         if self.cap != 0 {
-            while let Some(_) = self.pop() {}
+            while self.pop().is_some() {}
             let layout = Layout::array::<T>(self.cap).unwrap();
-            unsafe { self.alloc.dealloc(self.ptr.as_ptr() as *mut u8, layout) }
+            unsafe { self.alloc.dealloc(self.ptr.cast::<u8>(), layout) }
         }
     }
 }

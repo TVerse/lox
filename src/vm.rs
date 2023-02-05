@@ -106,7 +106,7 @@ impl<'a, W: Write> VM<'a, W> {
                         Value::Obj(obj) => {
                             if let Some(s) = obj.as_objstring() {
                                 let value = self.peek(0)?;
-                                self.globals.insert(s, *value);
+                                self.globals.insert(s.0, *value);
                                 let _ = self.pop();
                             } else {
                                 return Err(IncorrectInvariantError::InvalidTypes.into());
@@ -120,7 +120,7 @@ impl<'a, W: Write> VM<'a, W> {
                     match name {
                         Value::Obj(obj) => {
                             if let Some(s) = obj.as_objstring() {
-                                if let Some(v) = self.globals.get(s) {
+                                if let Some(v) = self.globals.get(s.0) {
                                     self.push(*v)?;
                                 } else {
                                     return Err(
@@ -139,8 +139,8 @@ impl<'a, W: Write> VM<'a, W> {
                     match name {
                         Value::Obj(obj) => {
                             if let Some(s) = obj.as_objstring() {
-                                if self.globals.insert(s, *self.peek(0)?) {
-                                    self.globals.delete(s);
+                                if self.globals.insert(s.0, *self.peek(0)?) {
+                                    self.globals.delete(s.0);
                                     return Err(
                                         RuntimeError::UndefinedVariable(obj.to_string()).into()
                                     );
@@ -219,15 +219,13 @@ impl<'a, W: Write> VM<'a, W> {
         let b = self.pop()?;
         let a = self.pop()?;
         let (a, b) = match (a, b) {
-            (Value::Obj(a), Value::Obj(b)) => unsafe {
-                match (a.as_objstring(), b.as_objstring()) {
-                    (Some(a), Some(b)) => (&*a, &*b),
-                    _ => unreachable!(),
-                }
+            (Value::Obj(a), Value::Obj(b)) => match (a.as_objstring(), b.as_objstring()) {
+                (Some(a), Some(b)) => (a, b),
+                _ => unreachable!(),
             },
             _ => unreachable!(),
         };
-        let value = Value::Obj(self.heap_manager.create_string_concat(a, b));
+        let value = Value::Obj(self.heap_manager.create_string_concat(&a, &b));
         self.push(value)
     }
 }
