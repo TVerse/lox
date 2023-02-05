@@ -134,6 +134,24 @@ impl<'a, W: Write> VM<'a, W> {
                         _ => return Err(IncorrectInvariantError::InvalidTypes.into()),
                     }
                 }
+                Opcode::SetGlobal => {
+                    let name = self.read_constant(chunk)?;
+                    match name {
+                        Value::Obj(obj) => {
+                            if let Some(s) = obj.as_objstring() {
+                                if self.globals.insert(s, *self.peek(0)?) {
+                                    self.globals.delete(s);
+                                    return Err(
+                                        RuntimeError::UndefinedVariable(obj.to_string()).into()
+                                    );
+                                }
+                            } else {
+                                return Err(IncorrectInvariantError::InvalidTypes.into());
+                            }
+                        }
+                        _ => return Err(IncorrectInvariantError::InvalidTypes.into()),
+                    }
+                }
             }
         }
 

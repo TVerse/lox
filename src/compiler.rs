@@ -274,7 +274,8 @@ impl<'a, 'b> Compiler<'a, 'b> {
             match token {
                 Ok(token) => {
                     if let Some((prefix_rule, _)) = get_parser(&token, OperatorType::Prefix) {
-                        if let Err(e) = prefix_rule(self, &token) {
+                        let can_assign = min_bp <= BindingPower::Assignment;
+                        if let Err(e) = prefix_rule(self, &token, can_assign) {
                             errors.extend(e);
                         }
                     } else {
@@ -300,8 +301,17 @@ impl<'a, 'b> Compiler<'a, 'b> {
                         }
                         let token = self.iter.next().unwrap().unwrap();
 
-                        if let Err(e) = infix_rule(self, &token) {
+                        let can_assign = min_bp <= BindingPower::Assignment;
+                        if let Err(e) = infix_rule(self, &token, can_assign) {
                             errors.extend(e);
+                        }
+                        let peek = self.peek_token()?;
+                        if can_assign && peek.contents == TokenContents::Equal {
+                            errors.push(CompileError::GeneralError(format!(
+                                "Found invalid = around line {}",
+                                peek.line
+                            )));
+                            break;
                         }
                     } else {
                         break;
@@ -321,7 +331,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         }
     }
 
-    fn parse_unary(&mut self, token: &Token) -> CompileResult<()> {
+    fn parse_unary(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
         self.expression_bp(BindingPower::Unary)?;
         match token.contents {
             TokenContents::Minus => self.chunk.add_opcode(Opcode::Negate, token.line),
@@ -331,7 +341,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         Ok(())
     }
 
-    fn parse_number(&mut self, token: &Token) -> CompileResult<()> {
+    fn parse_number(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
         let number: f64 = match &token.contents {
             TokenContents::Number(number) => number.parse().expect("Could not parse number"),
             _ => unreachable!("Expected number, got token {token:?}"),
@@ -345,7 +355,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         Ok(())
     }
 
-    fn parse_term(&mut self, token: &Token) -> CompileResult<()> {
+    fn parse_term(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
         self.expression_bp(BindingPower::Term)?;
         match token.contents {
             TokenContents::Plus => self.chunk.add_opcode(Opcode::Add, token.line),
@@ -355,7 +365,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         Ok(())
     }
 
-    fn parse_factor(&mut self, token: &Token) -> CompileResult<()> {
+    fn parse_factor(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
         self.expression_bp(BindingPower::Factor)?;
         match token.contents {
             TokenContents::Asterisk => self.chunk.add_opcode(Opcode::Multiply, token.line),
@@ -365,7 +375,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         Ok(())
     }
 
-    fn parse_grouping(&mut self, _token: &Token) -> CompileResult<()> {
+    fn parse_grouping(&mut self, _token: &Token, _can_assign: bool) -> CompileResult<()> {
         self.expression_bp(BindingPower::None)?;
         match self.iter.next() {
             Some(Ok(token)) => match token.contents {
@@ -386,7 +396,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         Ok(())
     }
 
-    fn parse_literal(&mut self, token: &Token) -> CompileResult<()> {
+    fn parse_literal(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
         match token.contents {
             TokenContents::True => self.chunk.add_opcode(Opcode::True, token.line),
             TokenContents::False => self.chunk.add_opcode(Opcode::False, token.line),
@@ -396,7 +406,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         Ok(())
     }
 
-    fn parse_equality(&mut self, token: &Token) -> CompileResult<()> {
+    fn parse_equality(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
         self.expression_bp(BindingPower::Equality)?;
         match token.contents {
             TokenContents::EqualEqual => self.chunk.add_opcode(Opcode::Equal, token.line),
@@ -409,7 +419,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         Ok(())
     }
 
-    fn parse_comparison(&mut self, token: &Token) -> CompileResult<()> {
+    fn parse_comparison(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
         self.expression_bp(BindingPower::Comparison)?;
         match token.contents {
             TokenContents::Greater => self.chunk.add_opcode(Opcode::Greater, token.line),
@@ -427,7 +437,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         Ok(())
     }
 
-    fn parse_string(&mut self, token: &Token) -> CompileResult<()> {
+    fn parse_string(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
         match token.contents {
             TokenContents::String(s) => {
                 let value = Value::Obj(self.heap_manager.create_string_copied(s));
@@ -443,10 +453,16 @@ impl<'a, 'b> Compiler<'a, 'b> {
         Ok(())
     }
 
-    fn parse_identifier(&mut self, token: &Token) -> CompileResult<()> {
+    fn parse_identifier(&mut self, token: &Token, can_assign: bool) -> CompileResult<()> {
         match token.contents {
             TokenContents::Identifier(id) => {
                 let idx = self.identifier_constant(id)?;
+                if self.peek_token()?.contents == TokenContents::Equal && can_assign {
+                    self.next_token()?;
+                    self.expression()?;
+                    self.chunk
+                        .add_opcode_and_operand(Opcode::SetGlobal, idx, token.line);
+                }
                 self.chunk
                     .add_opcode_and_operand(Opcode::GetGlobal, idx, token.line);
             }
@@ -505,7 +521,7 @@ enum OperatorType {
     Infix,
 }
 
-type Parser<'a, 'b, 'c> = fn(&'c mut Compiler<'a, 'b>, &'c Token<'b>) -> CompileResult<()>;
+type Parser<'a, 'b, 'c> = fn(&'c mut Compiler<'a, 'b>, &'c Token<'b>, bool) -> CompileResult<()>;
 
 #[derive(Error, Debug, Clone)]
 pub struct CompileErrors {
