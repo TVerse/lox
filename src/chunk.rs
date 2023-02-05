@@ -29,6 +29,8 @@ pub enum Opcode {
     DefineGlobal,
     GetGlobal,
     SetGlobal,
+    GetLocal,
+    SetLocal,
 }
 
 impl Opcode {
@@ -157,6 +159,9 @@ impl Chunk {
                     | Opcode::DefineGlobal
                     | Opcode::GetGlobal
                     | Opcode::SetGlobal => self.constant_instruction(opcode, iter.next().map(code)),
+                    Opcode::GetLocal | Opcode::SetLocal => {
+                        self.byte_instruction(opcode, iter.next().map(code))
+                    }
                 }
             } else {
                 format!("Unknown opcode 0x{opcode:02x}")
@@ -188,6 +193,15 @@ impl Chunk {
             } else {
                 format!("(index 0x{idx:02x} unknown)")
             }
+        } else {
+            "(unknown)".to_string()
+        };
+        format!("{opcode:?} {value}")
+    }
+
+    fn byte_instruction(&self, opcode: Opcode, operand: Option<u8>) -> String {
+        let value = if let Some(idx) = operand {
+            format!("{}", idx)
         } else {
             "(unknown)".to_string()
         };

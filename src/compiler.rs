@@ -2,12 +2,16 @@ use crate::chunk::{Chunk, Opcode};
 use crate::heap::HeapManager;
 use crate::scanner::{ScanError, ScanResult, Token, TokenContents};
 use crate::value::Value;
+use arrayvec::ArrayVec;
 use log::trace;
 use std::fmt::{Display, Formatter};
 use std::iter::Peekable;
+use std::num::NonZeroUsize;
 use thiserror::Error;
 
 type CompileResult<A> = Result<A, CompileErrors>;
+
+const MAX_LOCALS: usize = 256;
 
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
@@ -65,6 +69,14 @@ struct Compiler<'a, 'b> {
     chunk: Chunk,
     heap_manager: &'b mut HeapManager,
     errors: CompileErrors,
+    locals: ArrayVec<Local<'a>, MAX_LOCALS>,
+    scope_depth: usize,
+}
+
+#[derive(Debug)]
+struct Local<'a> {
+    name: &'a str,
+    depth: Option<NonZeroUsize>,
 }
 
 impl<'a, 'b> Compiler<'a, 'b> {
@@ -79,6 +91,8 @@ impl<'a, 'b> Compiler<'a, 'b> {
             chunk,
             heap_manager,
             errors: CompileErrors::default(),
+            locals: ArrayVec::new(),
+            scope_depth: 0,
         }
     }
 
@@ -176,14 +190,21 @@ impl<'a, 'b> Compiler<'a, 'b> {
         }
     }
 
-    fn parse_variable(&mut self) -> CompileResult<u8> {
+    fn parse_variable(&mut self) -> CompileResult<Option<u8>> {
         let mut errors = CompileErrors::new();
         match self.iter.next() {
             Some(token) => match token {
                 Ok(token) => {
                     let line = token.line;
                     match token.contents {
-                        TokenContents::Identifier(id) => self.identifier_constant(id),
+                        TokenContents::Identifier(id) => {
+                            self.declare_variable(id)?;
+                            if self.scope_depth > 0 {
+                                Ok(None)
+                            } else {
+                                self.identifier_constant(id).map(Some)
+                            }
+                        }
                         _ => {
                             errors.push(CompileError::GeneralError(format!(
                                 "Expected identifier after 'var' on line {line}"
@@ -212,9 +233,46 @@ impl<'a, 'b> Compiler<'a, 'b> {
             .ok_or_else(|| CompileErrors::from(CompileError::TooManyConstants))
     }
 
-    fn define_variable(&mut self, idx: u8, line: usize) -> CompileResult<()> {
-        self.chunk
-            .add_opcode_and_operand(Opcode::DefineGlobal, idx, line);
+    fn declare_variable(&mut self, name: &'a str) -> CompileResult<()> {
+        if let Some(local_depth) = NonZeroUsize::new(self.scope_depth) {
+            for local in self
+                .locals
+                .iter()
+                .rev()
+                .filter(|l| l.depth == Some(local_depth))
+            {
+                if name == local.name {
+                    return Err(CompileError::GeneralError(format!(
+                        "Already a variable with name {name}"
+                    ))
+                    .into());
+                }
+            }
+            self.add_local(name)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn add_local(&mut self, name: &'a str) -> CompileResult<()> {
+        self.locals
+            .try_push(Local { name, depth: None })
+            .map_err(|_| CompileError::GeneralError("Too many locals".to_string()).into())
+    }
+
+    fn define_variable(&mut self, idx: Option<u8>, line: usize) -> CompileResult<()> {
+        if let Some(idx) = idx {
+            self.chunk
+                .add_opcode_and_operand(Opcode::DefineGlobal, idx, line);
+        } else if let Some(local_depth) = NonZeroUsize::new(self.scope_depth) {
+            if let Some(local) = self.locals.last_mut() {
+                local.depth = Some(local_depth);
+            } else {
+                unreachable!("Invalid local count?")
+            }
+        } else {
+            unreachable!("Not in global or local scope?")
+        }
         Ok(())
     }
 
@@ -241,7 +299,49 @@ impl<'a, 'b> Compiler<'a, 'b> {
                     Err(errors)
                 }
             }
+            TokenContents::LeftBrace => {
+                let _ = self.next_token()?;
+                self.begin_scope();
+                self.block()?;
+                self.end_scope(line);
+                Ok(())
+            }
             _ => self.expression_statement(line),
+        }
+    }
+
+    fn begin_scope(&mut self) {
+        self.scope_depth += 1;
+    }
+
+    fn end_scope(&mut self, line: usize) {
+        self.scope_depth -= 1;
+        while let Some(last) = self.locals.last() {
+            if let Some(local_depth) = last.depth {
+                if local_depth.get() > self.scope_depth {
+                    self.chunk.add_opcode(Opcode::Pop, line);
+                    let _ = self.locals.pop();
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn block(&mut self) -> CompileResult<()> {
+        while let Ok(next) = self.peek_token() {
+            match next.contents {
+                TokenContents::RightBrace => break,
+                _ => self.declaration()?,
+            }
+        }
+        match self.next_token() {
+            Ok(token) if token.contents == TokenContents::RightBrace => Ok(()),
+            _ => Err(
+                CompileError::GeneralError("Didn't find matching closing brace".to_string()).into(),
+            ),
         }
     }
 
@@ -456,19 +556,37 @@ impl<'a, 'b> Compiler<'a, 'b> {
     fn parse_identifier(&mut self, token: &Token, can_assign: bool) -> CompileResult<()> {
         match token.contents {
             TokenContents::Identifier(id) => {
-                let idx = self.identifier_constant(id)?;
+                let (get_op, set_op, idx) = if let Some(idx) = self.resolve_local(id)? {
+                    (Opcode::GetLocal, Opcode::SetLocal, idx)
+                } else {
+                    let idx = self.identifier_constant(id)?;
+                    (Opcode::GetGlobal, Opcode::SetGlobal, idx)
+                };
                 if self.peek_token()?.contents == TokenContents::Equal && can_assign {
                     self.next_token()?;
                     self.expression()?;
-                    self.chunk
-                        .add_opcode_and_operand(Opcode::SetGlobal, idx, token.line);
+                    self.chunk.add_opcode_and_operand(set_op, idx, token.line);
                 }
-                self.chunk
-                    .add_opcode_and_operand(Opcode::GetGlobal, idx, token.line);
+                self.chunk.add_opcode_and_operand(get_op, idx, token.line);
             }
             _ => unreachable!("Unexpected identifier token, got {token:?}"),
         }
         Ok(())
+    }
+
+    fn resolve_local(&mut self, name: &str) -> CompileResult<Option<u8>> {
+        for (idx, local) in self
+            .locals
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.depth.is_some())
+            .rev()
+        {
+            if local.name == name {
+                return Ok(Some(idx as u8));
+            }
+        }
+        Ok(None)
     }
 }
 

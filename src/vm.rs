@@ -152,6 +152,14 @@ impl<'a, W: Write> VM<'a, W> {
                         _ => return Err(IncorrectInvariantError::InvalidTypes.into()),
                     }
                 }
+                Opcode::SetLocal => {
+                    let slot = self.read_byte(chunk)?;
+                    self.stack[slot as usize] = *self.peek(0)?;
+                }
+                Opcode::GetLocal => {
+                    let slot = self.read_byte(chunk)?;
+                    self.push(self.stack[slot as usize])?;
+                }
             }
         }
 
