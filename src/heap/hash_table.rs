@@ -1,15 +1,15 @@
 use crate::heap::allocator::Allocator;
-use crate::heap::ObjString;
+use crate::heap::{BoxedObjString, ObjString};
 use crate::value::Value;
 use std::alloc::Layout;
 use std::fmt::{Debug, Formatter};
-use std::ptr;
+use std::ptr::NonNull;
 use std::sync::Arc;
 
 pub struct HashTable {
     count: usize,
     capacity: usize,
-    entries: *mut Entry,
+    entries: NonNull<Entry>,
     alloc: Arc<Allocator>,
 }
 
@@ -20,26 +20,31 @@ impl HashTable {
         Self {
             count: 0,
             capacity: 0,
-            entries: ptr::null_mut(),
+            entries: NonNull::dangling(),
             alloc,
         }
     }
 
-    pub(in crate::heap) fn get_string(&self, key: *const ObjString) -> Option<*const ObjString> {
+    pub(in crate::heap) fn get_string(&self, key: NonNull<ObjString>) -> Option<BoxedObjString> {
         if self.count == 0 {
             return None;
         }
         unsafe {
-            let hash = (*key).hash() as usize;
+            let hash = ObjString::hash(key) as usize;
             let index = hash % self.capacity;
             for i in 0..self.capacity {
-                let entry = self.entries.add((index + i) % self.capacity);
-                if (*entry).key.is_null() {
-                    if (*entry).value == Value::Nil {
-                        return None;
+                let entry = self.entries.as_ptr().add((index + i) % self.capacity);
+                match (*entry).key {
+                    Some(entry_key) => {
+                        if entry_key.as_str() == ObjString::as_str(key) {
+                            return Some(entry_key);
+                        }
                     }
-                } else if ObjString::as_str(&*(*entry).key) == ObjString::as_str(&*key) {
-                    return Some((*entry).key);
+                    None => {
+                        if (*entry).value == Value::Nil {
+                            return None;
+                        }
+                    }
                 }
             }
             unreachable!("Didn't find string in intern table")
@@ -47,9 +52,9 @@ impl HashTable {
     }
 
     pub unsafe fn clear(&mut self) {
-        if !self.entries.is_null() {
+        if self.count != 0 {
             self.alloc.dealloc(
-                self.entries as *mut u8,
+                self.entries.cast::<u8>(),
                 Layout::array::<Entry>(self.capacity).unwrap(),
             )
         }
@@ -57,14 +62,14 @@ impl HashTable {
         self.capacity = 0;
     }
 
-    pub fn get(&self, key: *const ObjString) -> Option<&Value> {
-        if self.capacity == 0 {
+    pub fn get(&self, key: BoxedObjString) -> Option<&Value> {
+        if self.count == 0 {
             return None;
         }
-        let entry = Self::find_entry(self.entries, key, self.capacity);
+        let entry = Self::find_entry(self.entries, key.0, self.capacity);
         unsafe {
-            if !(*entry).key.is_null() {
-                let entry = &*entry;
+            if (*entry.as_ptr()).key.is_some() {
+                let entry = &*(entry.as_ptr());
                 Some(&entry.value)
             } else {
                 None
@@ -73,18 +78,18 @@ impl HashTable {
     }
 
     // TODO Option<Value>
-    pub fn delete(&mut self, key: *const ObjString) -> bool {
+    pub fn delete(&mut self, key: BoxedObjString) -> bool {
         if self.count == 0 {
             return false;
         }
 
         unsafe {
-            let entry = Self::find_entry(self.entries, key, self.capacity);
-            if (*entry).key.is_null() {
+            let entry = Self::find_entry(self.entries, key.0, self.capacity);
+            if (*entry.as_ptr()).key.is_none() {
                 return false;
             }
-            entry.write(Entry {
-                key: ptr::null_mut(),
+            entry.as_ptr().write(Entry {
+                key: None,
                 value: Value::Boolean(true),
             });
             true
@@ -92,21 +97,20 @@ impl HashTable {
     }
 
     // TODO Option<Value>
-    pub fn insert(&mut self, key: *const ObjString, value: Value) -> bool {
+    pub fn insert(&mut self, key: BoxedObjString, value: Value) -> bool {
         if (self.count + 1) as f64 > (self.capacity as f64) * Self::MAX_LOAD {
             let new_capacity = self.grow_capacity();
             self.adjust_capacity(new_capacity)
         }
-
-        let entry = Self::find_entry(self.entries, key, self.capacity);
+        let entry = Self::find_entry(self.entries, key.0, self.capacity);
         unsafe {
-            let is_new_key = (*entry).key.is_null();
+            let is_new_key = (*entry.as_ptr()).key.is_none();
             if is_new_key {
                 self.count += 1;
             }
 
-            (*entry).key = key;
-            (*entry).value = value;
+            (*entry.as_ptr()).key = Some(key);
+            (*entry.as_ptr()).value = value;
 
             is_new_key
         }
@@ -121,7 +125,7 @@ impl HashTable {
     }
 
     fn entries_as_slice(&self) -> &[Entry] {
-        unsafe { std::slice::from_raw_parts(self.entries as *const _, self.capacity) }
+        unsafe { std::slice::from_raw_parts(self.entries.as_ptr() as *const _, self.capacity) }
     }
 
     fn adjust_capacity(&mut self, new_capacity: usize) {
@@ -129,28 +133,28 @@ impl HashTable {
             let entries = self
                 .alloc
                 .allocate(Layout::array::<Entry>(new_capacity).unwrap())
-                as *mut Entry;
+                .cast::<Entry>();
             for i in 0..new_capacity {
                 let entry = Entry {
-                    key: ptr::null_mut(),
+                    key: None,
                     value: Value::Nil,
                 };
-                entries.add(i).write(entry)
+                entries.as_ptr().add(i).write(entry)
             }
+            let prev_count = self.count;
             self.count = 0;
             for i in 0..self.capacity {
-                let source = self.entries.add(i).read();
-                if source.key.is_null() {
-                    continue;
+                let source = self.entries.as_ptr().add(i).read();
+                if let Some(key) = source.key {
+                    let dest = Self::find_entry(entries, key.0, new_capacity);
+                    dest.as_ptr().write(source);
+                    self.count += 1;
                 }
-                let dest = Self::find_entry(entries, source.key, new_capacity);
-                dest.write(source);
-                self.count += 1;
             }
 
-            if !self.entries.is_null() {
+            if prev_count != 0 {
                 self.alloc.dealloc(
-                    self.entries as *mut u8,
+                    self.entries.cast::<u8>(),
                     Layout::array::<Entry>(self.capacity).unwrap(),
                 )
             }
@@ -160,30 +164,39 @@ impl HashTable {
         }
     }
 
-    fn find_entry(entries: *mut Entry, key: *const ObjString, capacity: usize) -> *mut Entry {
+    fn find_entry(
+        entries: NonNull<Entry>,
+        key: NonNull<ObjString>,
+        capacity: usize,
+    ) -> NonNull<Entry> {
         unsafe {
-            let hash = (*key).hash() as usize;
+            let hash = ObjString::hash(key) as usize;
             let index = hash % capacity;
-            let mut tombstone: *mut Entry = ptr::null_mut();
+            let mut tombstone: Option<NonNull<Entry>> = None;
             for i in 0..capacity {
-                let entry = entries.add((index + i) % capacity);
-                if (*entry).key.is_null() {
-                    if (*entry).value == Value::Nil {
-                        return if !tombstone.is_null() {
-                            tombstone
-                        } else {
-                            entry
-                        };
-                    } else if tombstone.is_null() {
-                        tombstone = entry
+                let entry = NonNull::new_unchecked(entries.as_ptr().add((index + i) % capacity));
+                match (*entry.as_ptr()).key {
+                    None => {
+                        if (*entry.as_ptr()).value == Value::Nil {
+                            return if let Some(tombstone) = tombstone {
+                                tombstone
+                            } else {
+                                entry
+                            };
+                        } else if tombstone.is_none() {
+                            tombstone = Some(entry)
+                        }
                     }
-                } else if (*entry).key == key {
-                    return entry;
+                    Some(entry_key) => {
+                        if entry_key.0 == key {
+                            return entry;
+                        }
+                    }
                 }
             }
             unreachable!(
                 "Didn't find entry for {key:?} in table {:?}",
-                std::slice::from_raw_parts(entries as *const _, capacity)
+                std::slice::from_raw_parts(entries.as_ptr() as *const _, capacity)
             )
         }
     }
@@ -206,10 +219,19 @@ impl Debug for HashTable {
     }
 }
 
-#[derive(Debug)]
 struct Entry {
-    key: *const ObjString,
+    key: Option<BoxedObjString>,
     value: Value,
+}
+
+impl Debug for Entry {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Entry")
+            .field("key", &self.key)
+            .field("value", &self.value)
+            .field("key_val", &self.key.map(|k| ObjString::as_str(k.0)))
+            .finish()
+    }
 }
 
 #[cfg(test)]
@@ -252,12 +274,12 @@ mod tests {
             .collect();
 
         for (k, v) in kvs.iter() {
-            assert!(table.insert(*k, *v), "{k:?}, {}, {v}", unsafe { &**k });
-            assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {}, {v}", unsafe { &**k });
-            assert!(!table.insert(*k, *v), "{k:?}, {}, {v}", unsafe { &**k });
+            assert!(table.insert(*k, *v), "{k:?}, {k}, {v}");
+            assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {k}, {v}");
+            assert!(!table.insert(*k, *v), "{k:?}, {k}, {v}");
         }
         for (k, v) in kvs.iter() {
-            assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {}, {v}", unsafe { &**k });
+            assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {k}, {v}");
         }
     }
 
@@ -271,7 +293,9 @@ mod tests {
         let key = obj.as_objstring().unwrap();
         let value = Value::Number(1.5);
         assert_eq!(table.get(key), None);
+        dbg!(&table);
         assert!(table.insert(key, value));
+        dbg!(&table);
         assert_eq!(table.get(key).unwrap(), &value);
         assert!(!table.insert(key, value));
     }
@@ -294,14 +318,14 @@ mod tests {
             .collect();
 
         for (k, v) in kvs.iter() {
-            assert!(table.insert(*k, *v), "{k:?}, {}, {v}", unsafe { &**k });
-            assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {}, {v}", unsafe { &**k });
-            assert!(!table.insert(*k, *v), "{k:?}, {}, {v}", unsafe { &**k });
+            assert!(table.insert(*k, *v), "{k:?}, {k}, {v}");
+            assert_eq!(table.get(*k).unwrap(), v, "{k:?}, {k}, {v}");
+            assert!(!table.insert(*k, *v), "{k:?}, {k}, {v}");
             assert!(table.delete(*k));
-            assert_eq!(table.get(*k), None, "{k:?}, {}, {v}", unsafe { &**k });
+            assert_eq!(table.get(*k), None, "{k:?}, {k}, {v}");
         }
         for (k, v) in kvs.iter() {
-            assert_eq!(table.get(*k), None, "{k:?}, {}, {v}", unsafe { &**k });
+            assert_eq!(table.get(*k), None, "{k:?}, {k}, {v}");
         }
     }
 }

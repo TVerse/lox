@@ -219,15 +219,13 @@ impl<'a, W: Write> VM<'a, W> {
         let b = self.pop()?;
         let a = self.pop()?;
         let (a, b) = match (a, b) {
-            (Value::Obj(a), Value::Obj(b)) => unsafe {
-                match (a.as_objstring(), b.as_objstring()) {
-                    (Some(a), Some(b)) => (&*a, &*b),
-                    _ => unreachable!(),
-                }
+            (Value::Obj(a), Value::Obj(b)) => match (a.as_objstring(), b.as_objstring()) {
+                (Some(a), Some(b)) => (a, b),
+                _ => unreachable!(),
             },
             _ => unreachable!(),
         };
-        let value = Value::Obj(self.heap_manager.create_string_concat(a, b));
+        let value = Value::Obj(self.heap_manager.create_string_concat(&a, &b));
         self.push(value)
     }
 }

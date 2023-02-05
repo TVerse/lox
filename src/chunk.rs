@@ -1,8 +1,11 @@
+use crate::heap::allocator::Allocator;
+use crate::heap::Vec;
 use crate::value::Value;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::fmt::Write;
 use std::fmt::{Debug, Formatter};
 use std::ops::Deref;
+use std::sync::Arc;
 
 #[derive(Debug, Copy, Clone, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
@@ -42,12 +45,12 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn new(name: String) -> Self {
+    pub fn new(name: String, alloc: Arc<Allocator>) -> Self {
         Self {
-            code: Vec::with_capacity(8),
-            constants: Vec::with_capacity(8),
+            code: Vec::new(alloc.clone()),
+            constants: Vec::new(alloc.clone()),
             name,
-            lines: Vec::with_capacity(8),
+            lines: Vec::new(alloc),
         }
     }
 
