@@ -8,6 +8,8 @@ use std::{ptr, slice};
 
 pub mod allocator;
 pub mod hash_table;
+mod vec;
+pub use vec::Vec;
 
 #[derive(Debug)]
 pub struct HeapManager {
@@ -23,6 +25,10 @@ impl HeapManager {
             alloc,
             strings,
         }
+    }
+
+    pub fn alloc(&self) -> Arc<Allocator> {
+        self.alloc.clone()
     }
 
     unsafe fn register_object(&mut self, object: *mut Object) {
@@ -62,7 +68,7 @@ impl HeapManager {
     }
 
     unsafe fn move_to_heap<T>(&mut self, object: T) -> *mut Object {
-        let ptr = self.alloc.allocate(Layout::new::<T>()) as *mut T;
+        let ptr = self.alloc.allocate(Layout::new::<T>()).as_ptr() as *mut T;
         ptr.write(object);
         let ptr = ptr as *mut Object;
         self.register_object(ptr);
@@ -164,7 +170,7 @@ impl ObjString {
     fn new_copied(s: &str, alloc: Arc<Allocator>) -> Self {
         let len = s.len();
         let str_ptr = unsafe {
-            let str_ptr = alloc.allocate(Layout::array::<u8>(len).unwrap());
+            let str_ptr = alloc.allocate(Layout::array::<u8>(len).unwrap()).as_ptr();
             ptr::copy(s.as_ptr(), str_ptr, len);
             str_ptr as *const _
         };
@@ -207,7 +213,8 @@ impl ObjString {
             let str_ptr = self
                 .object
                 .alloc
-                .allocate(Layout::array::<u8>(len).unwrap());
+                .allocate(Layout::array::<u8>(len).unwrap())
+                .as_ptr();
             ptr::copy(self.internal.ptr, str_ptr, self.internal.len);
             ptr::copy(
                 other.internal.ptr,

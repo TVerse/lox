@@ -129,7 +129,7 @@ impl HashTable {
             let entries = self
                 .alloc
                 .allocate(Layout::array::<Entry>(new_capacity).unwrap())
-                as *mut Entry;
+                .as_ptr() as *mut Entry;
             for i in 0..new_capacity {
                 let entry = Entry {
                     key: ptr::null_mut(),

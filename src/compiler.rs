@@ -48,7 +48,7 @@ pub fn compile<'a, 'b>(
     iter: &'b mut impl Iterator<Item = ScanResult<Token<'a>>>,
     heap_manager: &'b mut HeapManager,
 ) -> CompileResult<Chunk> {
-    let chunk = Chunk::new("main".to_string());
+    let chunk = Chunk::new("main".to_string(), heap_manager.alloc());
     let mut compiler = Compiler::new(iter, chunk, heap_manager);
     compiler.compile()?;
     let Compiler { mut chunk, .. } = compiler;
