@@ -1,7 +1,7 @@
 use crate::chunk::{Chunk, Opcode};
 use crate::heap::allocator::Allocator;
 use crate::heap::hash_table::HashTable;
-use crate::heap::{HeapManager, ObjString, Object};
+use crate::heap::HeapManager;
 use crate::value::Value;
 use arrayvec::ArrayVec;
 use log::{error, trace};
@@ -14,6 +14,7 @@ type VMResult<A> = Result<A, VMError>;
 
 const STACK_SIZE: usize = 256;
 
+#[derive(Debug)]
 pub struct VM<'a, W: Write> {
     write: &'a mut W,
     ip: usize,
@@ -66,11 +67,8 @@ impl<'a, W: Write> VM<'a, W> {
                         (Value::Number(_), Value::Number(_)) => {
                             self.binary_op(|a, b| a + b, Value::Number)?
                         }
-                        (Value::Obj(ptra), Value::Obj(ptrb)) => {
-                            match (
-                                Object::as_objstring(*ptra as *const _),
-                                Object::as_objstring(*ptrb as *const _),
-                            ) {
+                        (Value::Obj(a), Value::Obj(b)) => {
+                            match (a.as_objstring(), b.as_objstring()) {
                                 (Some(_), Some(_)) => self.concatenate()?,
                                 _ => return Err(RuntimeError::InvalidTypes.into()),
                             }
@@ -106,7 +104,7 @@ impl<'a, W: Write> VM<'a, W> {
                     let name = self.read_constant(chunk)?;
                     match name {
                         Value::Obj(obj) => {
-                            if let Some(s) = Object::as_objstring(*obj) {
+                            if let Some(s) = obj.as_objstring() {
                                 let value = self.peek(0)?;
                                 self.globals.insert(s, *value);
                                 let _ = self.pop();
@@ -121,14 +119,13 @@ impl<'a, W: Write> VM<'a, W> {
                     let name = self.read_constant(chunk)?;
                     match name {
                         Value::Obj(obj) => {
-                            if let Some(s) = Object::as_objstring(*obj) {
+                            if let Some(s) = obj.as_objstring() {
                                 if let Some(v) = self.globals.get(s) {
                                     self.push(*v)?;
                                 } else {
-                                    return Err(RuntimeError::UndefinedVariable(
-                                        Object::to_string(s as *const Object),
-                                    )
-                                    .into());
+                                    return Err(
+                                        RuntimeError::UndefinedVariable(obj.to_string()).into()
+                                    );
                                 }
                             } else {
                                 return Err(IncorrectInvariantError::InvalidTypes.into());
@@ -205,7 +202,7 @@ impl<'a, W: Write> VM<'a, W> {
         let a = self.pop()?;
         let (a, b) = match (a, b) {
             (Value::Obj(a), Value::Obj(b)) => unsafe {
-                match (Object::as_objstring(a), Object::as_objstring(b)) {
+                match (a.as_objstring(), b.as_objstring()) {
                     (Some(a), Some(b)) => (&*a, &*b),
                     _ => unreachable!(),
                 }

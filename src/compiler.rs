@@ -82,6 +82,26 @@ impl<'a, 'b> Compiler<'a, 'b> {
         }
     }
 
+    fn next_token(&mut self) -> CompileResult<Token> {
+        match self.iter.next() {
+            Some(token) => match token {
+                Ok(token) => Ok(token),
+                Err(e) => Err(CompileError::ScanError(e).into()),
+            },
+            None => Err(CompileError::GeneralError("Unexpected end of stream".to_string()).into()),
+        }
+    }
+
+    fn peek_token(&mut self) -> CompileResult<&Token> {
+        match self.iter.peek() {
+            Some(token) => match token {
+                Ok(token) => Ok(token),
+                Err(e) => Err(CompileError::ScanError(e.clone()).into()),
+            },
+            None => Err(CompileError::GeneralError("Unexpected end of stream".to_string()).into()),
+        }
+    }
+
     fn compile(&mut self) -> CompileResult<()> {
         while let Some(Ok(_)) = self.iter.peek() {
             self.declaration()?;
@@ -97,6 +117,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
     fn declaration(&mut self) -> CompileResult<()> {
         let contents = &self.iter.peek().unwrap().as_ref().unwrap().contents;
         let result = if *contents == TokenContents::Var {
+            let _ = self.iter.next();
             self.var_declaration()
         } else {
             self.statement()
@@ -131,7 +152,6 @@ impl<'a, 'b> Compiler<'a, 'b> {
 
     fn var_declaration(&mut self) -> CompileResult<()> {
         let mut errors = CompileErrors::new();
-        let _ = self.iter.next();
         let constant_index = self.parse_variable()?;
         if let Some(Ok(token)) = self.iter.peek() {
             match token.contents {
@@ -200,45 +220,37 @@ impl<'a, 'b> Compiler<'a, 'b> {
 
     fn statement(&mut self) -> CompileResult<()> {
         let mut errors = CompileErrors::new();
-        let token = self.iter.peek().unwrap();
-        match token {
-            Ok(token) => {
-                let line = token.line;
-                match token.contents {
-                    TokenContents::Print => {
-                        let _ = self.iter.next().unwrap().unwrap();
-                        self.expression()?;
-                        if let Some(Ok(Token {
-                            contents: TokenContents::Semicolon,
-                            line,
-                        })) = self.iter.next()
-                        {
-                            self.chunk.add_opcode(Opcode::Print, line);
-                            Ok(())
-                        } else {
-                            errors.push(CompileError::GeneralError(format!(
-                                "Missing semicolon around line {}",
-                                line
-                            )));
-                            Err(errors)
-                        }
-                    }
-                    _ => self.expression_statement(line),
+        let token = self.peek_token()?;
+        let line = token.line;
+        match token.contents {
+            TokenContents::Print => {
+                let _ = self.next_token();
+                self.expression()?;
+                if let Some(Ok(Token {
+                    contents: TokenContents::Semicolon,
+                    line,
+                })) = self.iter.next()
+                {
+                    self.chunk.add_opcode(Opcode::Print, line);
+                    Ok(())
+                } else {
+                    errors.push(CompileError::GeneralError(format!(
+                        "Missing semicolon around line {}",
+                        line
+                    )));
+                    Err(errors)
                 }
             }
-            Err(e) => {
-                errors.push(e.clone().into());
-                Err(errors)
-            }
+            _ => self.expression_statement(line),
         }
     }
 
     fn expression_statement(&mut self, estimated_line: usize) -> CompileResult<()> {
         self.expression()?;
-        if let Some(Ok(Token {
+        if let Ok(Token {
             contents: TokenContents::Semicolon,
             line,
-        })) = self.iter.next()
+        }) = self.next_token()
         {
             self.chunk.add_opcode(Opcode::Pop, line);
             Ok(())
@@ -314,12 +326,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         match token.contents {
             TokenContents::Minus => self.chunk.add_opcode(Opcode::Negate, token.line),
             TokenContents::Bang => self.chunk.add_opcode(Opcode::Not, token.line),
-            _ => {
-                return Err(CompileError::GeneralError(format!(
-                    "Unexpected unary token, got {token:?}"
-                ))
-                .into());
-            }
+            _ => unreachable!("Unexpected unary token, got {token:?}"),
         }
         Ok(())
     }
@@ -327,12 +334,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
     fn parse_number(&mut self, token: &Token) -> CompileResult<()> {
         let number: f64 = match &token.contents {
             TokenContents::Number(number) => number.parse().expect("Could not parse number"),
-            _ => {
-                return Err(CompileError::GeneralError(format!(
-                    "Expected number, got token {token:?}"
-                ))
-                .into());
-            }
+            _ => unreachable!("Expected number, got token {token:?}"),
         };
         let constant = self
             .chunk
@@ -348,12 +350,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         match token.contents {
             TokenContents::Plus => self.chunk.add_opcode(Opcode::Add, token.line),
             TokenContents::Minus => self.chunk.add_opcode(Opcode::Subtract, token.line),
-            _ => {
-                return Err(CompileError::GeneralError(format!(
-                    "Unexpected term token, got {token:?}"
-                ))
-                .into());
-            }
+            _ => unreachable!("Unexpected term token, got {token:?}"),
         }
         Ok(())
     }
@@ -363,12 +360,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         match token.contents {
             TokenContents::Asterisk => self.chunk.add_opcode(Opcode::Multiply, token.line),
             TokenContents::Slash => self.chunk.add_opcode(Opcode::Divide, token.line),
-            _ => {
-                return Err(CompileError::GeneralError(format!(
-                    "Unexpected term token, got {token:?}"
-                ))
-                .into());
-            }
+            _ => unreachable!("Unexpected term token, got {token:?}"),
         }
         Ok(())
     }
@@ -399,12 +391,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
             TokenContents::True => self.chunk.add_opcode(Opcode::True, token.line),
             TokenContents::False => self.chunk.add_opcode(Opcode::False, token.line),
             TokenContents::Nil => self.chunk.add_opcode(Opcode::Nil, token.line),
-            _ => {
-                return Err(CompileError::GeneralError(format!(
-                    "Unexpected term token, got {token:?}"
-                ))
-                .into());
-            }
+            _ => unreachable!("Unexpected literal token, got {token:?}"),
         }
         Ok(())
     }
@@ -417,12 +404,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 self.chunk.add_opcode(Opcode::Equal, token.line);
                 self.chunk.add_opcode(Opcode::Not, token.line);
             }
-            _ => {
-                return Err(CompileError::GeneralError(format!(
-                    "Unexpected equality token, got {token:?}"
-                ))
-                .into());
-            }
+            _ => unreachable!("Unexpected equality token, got {token:?}"),
         }
         Ok(())
     }
@@ -440,12 +422,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 self.chunk.add_opcode(Opcode::Greater, token.line);
                 self.chunk.add_opcode(Opcode::Not, token.line);
             }
-            _ => {
-                return Err(CompileError::GeneralError(format!(
-                    "Unexpected equality token, got {token:?}"
-                ))
-                .into());
-            }
+            _ => unreachable!("Unexpected comparison token, got {token:?}"),
         }
         Ok(())
     }
@@ -453,7 +430,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
     fn parse_string(&mut self, token: &Token) -> CompileResult<()> {
         match token.contents {
             TokenContents::String(s) => {
-                let value = Value::Obj(self.heap_manager.create_string_copied(s) as *mut _);
+                let value = Value::Obj(self.heap_manager.create_string_copied(s));
                 let constant = self
                     .chunk
                     .add_constant(value)
@@ -461,12 +438,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 self.chunk
                     .add_opcode_and_operand(Opcode::Constant, constant, token.line)
             }
-            _ => {
-                return Err(CompileError::GeneralError(format!(
-                    "Unexpected string token, got {token:?}"
-                ))
-                .into());
-            }
+            _ => unreachable!("Unexpected string token, got {token:?}"),
         }
         Ok(())
     }
@@ -478,12 +450,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 self.chunk
                     .add_opcode_and_operand(Opcode::GetGlobal, idx, token.line);
             }
-            _ => {
-                return Err(CompileError::GeneralError(format!(
-                    "Unexpected identifier token, got {token:?}"
-                ))
-                .into());
-            }
+            _ => unreachable!("Unexpected identifier token, got {token:?}"),
         }
         Ok(())
     }

@@ -71,8 +71,7 @@ impl Chunk {
                 .constants
                 .iter()
                 .enumerate()
-                .find(|(_, c)| *c == &value)
-                .map(|(idx, _)| idx);
+                .find_map(|(idx, c)| (*c == value).then_some(idx));
             if let Some(idx) = existing_index {
                 Some(idx as u8)
             } else {
