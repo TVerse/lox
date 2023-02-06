@@ -368,9 +368,9 @@ impl<'a> FusedIterator for SourceIterator<'a> {}
 
 #[derive(Error, Debug, PartialEq, Clone)]
 pub enum ScanError {
-    #[error("Unknown token {0} at line {1}")]
+    #[error("[line {1}] Unknown token {0}")]
     UnknownToken(String, usize),
-    #[error("Unterminated string {0} at line {1}")]
+    #[error("[line {1}] Unterminated string {0}")]
     UnterminatedString(String, usize),
 }
 

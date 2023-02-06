@@ -131,7 +131,6 @@ impl HashTable {
 
     fn adjust_capacity(&mut self, new_capacity: usize) {
         unsafe {
-            debug!("start hashmap allocate");
             let entries = self
                 .alloc
                 .allocate(Layout::array::<Entry>(new_capacity).unwrap())

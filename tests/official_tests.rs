@@ -1,4 +1,4 @@
-use lox::{interpret, InterpretError};
+use lox::interpret;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashSet;

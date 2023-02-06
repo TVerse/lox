@@ -699,7 +699,7 @@ impl From<CompileError> for CompileErrors {
 pub enum CompileError {
     #[error(transparent)]
     ScanError(#[from] ScanError),
-    #[error("Too many constants")]
+    #[error("Too many constants in one chunk")]
     TooManyConstants,
     #[error("Compile error: {0}")]
     GeneralError(String),
