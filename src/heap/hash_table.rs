@@ -1,7 +1,6 @@
 use crate::heap::allocator::Allocator;
 use crate::heap::{BoxedObjString, ObjString};
 use crate::value::Value;
-use log::debug;
 use std::alloc::Layout;
 use std::fmt::{Debug, Formatter};
 use std::ptr::NonNull;

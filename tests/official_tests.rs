@@ -13,8 +13,7 @@ static EXPECTED_SYNTAX_ERROR: Lazy<Regex> =
     Lazy::new(|| Regex::new("\\[.*line (\\d+)] (Error.+)").unwrap());
 static EXPECTED_STACK_TRACE: Lazy<Regex> = Lazy::new(|| Regex::new("\\[line (\\d+)\\]").unwrap());
 
-fn execute_test(folder: &str, name: &str) {
-    let source = std::fs::read_to_string(format!("tests/lox/{folder}/{name}.lox")).unwrap();
+fn execute_test(source: &str) {
     let lines = source.lines();
     let mut expected_output = String::new();
     let mut expected_errors: HashSet<String> = HashSet::new();
@@ -60,8 +59,11 @@ macro_rules! test_bundled_inner {
     ($folder:literal : $file:literal) => {
         paste::item! {
             #[test]
+            #[cfg_attr(miri, ignore)]
             fn [< test_ $file >]() {
-                crate::execute_test($folder, $file)
+                // Embed so Miri can work
+                let source = include_str!(concat!("lox/", $folder, "/", $file, ".lox"));
+                crate::execute_test(source)
             }
         }
     };
