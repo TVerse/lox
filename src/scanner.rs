@@ -262,7 +262,12 @@ impl<'a> SourceIterator<'a> {
         }
 
         return Err(ScanError::UnterminatedString(
-            self.get_cur_str().unwrap_or("").to_string(),
+            self.get_cur_str()
+                .unwrap_or("")
+                .to_string()
+                .graphemes(true)
+                .take_while(|c| !NEWLINE_GRAPHEMES.contains(c))
+                .collect(),
             starting_line,
         ));
     }
@@ -492,11 +497,7 @@ mod tests {
         let iter = scanner.iter();
         let res: Vec<_> = iter.map(|t| t.unwrap_err()).collect();
         let expected = [ScanError::UnterminatedString(
-            "\"this string has no close quote\n"
-                .to_string()
-                .graphemes(true)
-                .take_while(|c| !NEWLINE_GRAPHEMES.contains(c))
-                .collect(),
+            "\"this string has no close quote".to_string(),
             2,
         )];
         assert_eq!(&res, &expected);
