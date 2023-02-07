@@ -316,6 +316,10 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 self.end_scope(line);
                 Ok(())
             }
+            TokenContents::If => {
+                let _ = self.next_token()?;
+                self.if_statement()
+            }
             _ => self.expression_statement(line),
         }
     }
@@ -353,6 +357,49 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 ParseError::GeneralError("Didn't find matching closing brace".to_string()).into(),
             ),
         }
+    }
+
+    fn if_statement(&mut self) -> CompileResult<()> {
+        match self.next_token() {
+            Ok(token) if token.contents == TokenContents::LeftParen => (),
+            _ => {
+                return Err(ParseError::GeneralError("Expected '(' after 'if'".to_string()).into())
+            }
+        }
+        self.expression()?;
+        let token = match self.next_token() {
+            Ok(token) if token.contents == TokenContents::RightParen => token,
+            _ => {
+                return Err(
+                    ParseError::GeneralError("Expected ')' after condition".to_string()).into(),
+                )
+            }
+        };
+        let line = token.line;
+        // TODO fix the line numbers here
+        let then_jump = self.emit_jump(Opcode::JumpIfFalse, line)?;
+        self.chunk.add_opcode(Opcode::Pop, line);
+        self.statement()?;
+        let else_jump = self.emit_jump(Opcode::Jump, line)?;
+        self.patch_jump(then_jump)?;
+        self.chunk.add_opcode(Opcode::Pop, line);
+        if let Some(Ok(t)) = self.iter.peek() {
+            if t.contents == TokenContents::Else {
+                let _ = self.next_token()?;
+                self.statement()?;
+            }
+        }
+        self.patch_jump(else_jump)
+    }
+
+    fn emit_jump(&mut self, opcode: Opcode, line: usize) -> CompileResult<usize> {
+        Ok(self.chunk.add_dummy_jump(opcode, line))
+    }
+
+    fn patch_jump(&mut self, target: usize) -> CompileResult<()> {
+        self.chunk
+            .patch_jump(target)
+            .map_err(|e| ParseError::GeneralError(e).into())
     }
 
     fn expression_statement(&mut self, estimated_line: usize) -> CompileResult<()> {

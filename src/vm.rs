@@ -164,6 +164,16 @@ impl<'a, W: Write> VM<'a, W> {
                     let slot = self.read_byte(chunk)?;
                     self.push(self.stack[slot as usize])?;
                 }
+                Opcode::JumpIfFalse => {
+                    let offset = self.read_short(chunk)?;
+                    if self.peek(0)?.is_falsey() {
+                        self.ip += offset as usize;
+                    }
+                }
+                Opcode::Jump => {
+                    let offset = self.read_short(chunk)?;
+                    self.ip += offset as usize;
+                }
             }
         }
 
@@ -187,6 +197,12 @@ impl<'a, W: Write> VM<'a, W> {
             })?;
         self.ip += 1;
         Ok(byte)
+    }
+
+    fn read_short(&mut self, chunk: &Chunk) -> VMResult<u16> {
+        let h = self.read_byte(chunk)?;
+        let l = self.read_byte(chunk)?;
+        Ok(((h as u16) << 8) | (l as u16))
     }
 
     fn read_constant<'b, 'c>(&'b mut self, chunk: &'c Chunk) -> VMResult<&'c Value> {

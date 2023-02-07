@@ -95,7 +95,7 @@ test_bundled!("assignment":
 );
 
 test_bundled!("block":
-    // "empty",
+    "empty",
     "scope",
 );
 
@@ -214,18 +214,18 @@ test_bundled!("bool":
 //     "too_many_parameters",
 // );
 
-// test_bundled!("if":
-//     "class_in_else",
-//     "class_in_then",
-//     "dangling_else",
-//     "else",
-//     "fun_in_else",
-//     "fun_in_then",
-//     "if",
-//     "truth",
-//     "var_in_else",
-//     "var_in_then",
-// );
+test_bundled!("if":
+    "class_in_else",
+    "class_in_then",
+    "dangling_else",
+    "else",
+    "fun_in_else",
+    "fun_in_then",
+    "if",
+    "truth",
+    "var_in_else",
+    "var_in_then",
+);
 
 // test_bundled!("inheritance":
 //     "constructor",
@@ -383,7 +383,7 @@ test_bundled!("variable":
     "undefined_global",
     "undefined_local",
     "uninitialized",
-    // "unreached_undefined",
+    "unreached_undefined",
     "use_false_as_var",
     "use_global_in_initializer",
     "use_local_in_initializer",
