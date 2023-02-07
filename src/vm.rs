@@ -58,7 +58,7 @@ impl<'a, W: Write> VM<'a, W> {
                     let value = self.pop()?;
                     let value = match value {
                         Value::Number(num) => Value::Number(-num),
-                        _ => return Err(RuntimeError::InvalidTypes.into()),
+                        _ => return Err(RuntimeError::InvalidType("number").into()),
                     };
                     self.push(value)?;
                 }
@@ -70,10 +70,14 @@ impl<'a, W: Write> VM<'a, W> {
                         (Value::Obj(a), Value::Obj(b)) => {
                             match (a.as_objstring(), b.as_objstring()) {
                                 (Some(_), Some(_)) => self.concatenate()?,
-                                _ => return Err(RuntimeError::InvalidTypes.into()),
+                                _ => return Err(RuntimeError::InvalidTypes("strings").into()),
                             }
                         }
-                        _ => return Err(RuntimeError::InvalidTypes.into()),
+                        _ => {
+                            return Err(
+                                RuntimeError::InvalidTypes("two numbers or two strings").into()
+                            )
+                        }
                     };
                 }
                 Opcode::Subtract => self.binary_op(|a, b| a - b, Value::Number)?,
@@ -211,7 +215,7 @@ impl<'a, W: Write> VM<'a, W> {
 
         let res = match (a, b) {
             (Value::Number(a), Value::Number(b)) => v(f(a, b)),
-            (_, _) => return Err(VMError::RuntimeError(RuntimeError::InvalidTypes)),
+            (_, _) => return Err(VMError::RuntimeError(RuntimeError::InvalidTypes("numbers"))),
         };
         self.push(res)?;
         Ok(())
@@ -242,7 +246,7 @@ impl<'a, W: Write> VM<'a, W> {
 pub enum VMError {
     #[error("Compilation error: {0}")]
     IncorrectInvariantError(#[from] IncorrectInvariantError),
-    #[error("Runtime error: {0}")]
+    #[error("runtime error: {0}")]
     RuntimeError(#[from] RuntimeError),
 }
 
@@ -264,8 +268,10 @@ pub enum RuntimeError {
     InvalidInstructionPointer { pointer: usize, chunk_length: usize },
     #[error("stack overflow")]
     StackOverflow,
-    #[error("invalid types")]
-    InvalidTypes,
-    #[error("undefined variable {0}")]
+    #[error("Invalid types: Operands must be {0}.")]
+    InvalidTypes(&'static str),
+    #[error("Invalid type: Operand must be a {0}.")]
+    InvalidType(&'static str),
+    #[error("Undefined variable '{0}'.")]
     UndefinedVariable(String),
 }

@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use std::iter::FusedIterator;
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
@@ -62,6 +63,55 @@ pub enum TokenContents<'a> {
     True,
     Var,
     While,
+}
+
+impl<'a> Display for TokenContents<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                TokenContents::LeftParen => "(",
+                TokenContents::RightParen => ")",
+                TokenContents::LeftBrace => "{",
+                TokenContents::RightBrace => "}",
+                TokenContents::Comma => ",",
+                TokenContents::Dot => ".",
+                TokenContents::Minus => "-",
+                TokenContents::Plus => "+",
+                TokenContents::Semicolon => ";",
+                TokenContents::Slash => "/",
+                TokenContents::Asterisk => "*",
+                TokenContents::Bang => "!",
+                TokenContents::BangEqual => "!=",
+                TokenContents::Equal => "=",
+                TokenContents::EqualEqual => "==",
+                TokenContents::Greater => ">",
+                TokenContents::GreaterEqual => ">=",
+                TokenContents::Less => "<",
+                TokenContents::LessEqual => "<=",
+                TokenContents::Identifier(id) => *id,
+                TokenContents::String(s) => *s,
+                TokenContents::Number(num) => *num,
+                TokenContents::And => "and",
+                TokenContents::Class => "class",
+                TokenContents::Else => "else",
+                TokenContents::False => "false",
+                TokenContents::For => "for",
+                TokenContents::Fun => "fun",
+                TokenContents::If => "if",
+                TokenContents::Nil => "nil",
+                TokenContents::Or => "or",
+                TokenContents::Print => "print",
+                TokenContents::Return => "return",
+                TokenContents::Super => "super",
+                TokenContents::This => "this",
+                TokenContents::True => "true",
+                TokenContents::Var => "var",
+                TokenContents::While => "while",
+            }
+        )
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -213,7 +263,7 @@ impl<'a> SourceIterator<'a> {
 
         return Err(ScanError::UnterminatedString(
             self.get_cur_str().unwrap_or("").to_string(),
-            self.line,
+            starting_line,
         ));
     }
 
@@ -354,11 +404,10 @@ impl<'a> Iterator for SourceIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.skip_whitespace();
-        let line = self.line;
         let c = self.get_and_advance()?;
         let res = self
             .match_token(c)
-            .or_else(|| Some(Err(ScanError::UnknownToken(c.to_string(), line))));
+            .or_else(|| Some(Err(ScanError::UnknownToken(c.to_string(), self.line))));
         self.reset();
         res
     }
@@ -368,9 +417,9 @@ impl<'a> FusedIterator for SourceIterator<'a> {}
 
 #[derive(Error, Debug, PartialEq, Clone)]
 pub enum ScanError {
-    #[error("[line {1}] Unknown token {0}")]
+    #[error("Unknown token {0}")]
     UnknownToken(String, usize),
-    #[error("[line {1}] Unterminated string {0}")]
+    #[error("[line {1}] Error: Unterminated string. First line: '{0}'")]
     UnterminatedString(String, usize),
 }
 
@@ -431,6 +480,25 @@ mod tests {
             Token::new(String("hi!\nsup"), 2),
             Token::new(String("how are you?"), 4),
         ];
+        assert_eq!(&res, &expected);
+    }
+
+    #[test]
+    fn unterminated_string() {
+        let source = r#"// [line 2] Error: Unterminated string.
+"this string has no close quote
+"#;
+        let scanner = Scanner::new(source);
+        let iter = scanner.iter();
+        let res: Vec<_> = iter.map(|t| t.unwrap_err()).collect();
+        let expected = [ScanError::UnterminatedString(
+            "\"this string has no close quote\n"
+                .to_string()
+                .graphemes(true)
+                .take_while(|c| !NEWLINE_GRAPHEMES.contains(c))
+                .collect(),
+            2,
+        )];
         assert_eq!(&res, &expected);
     }
 
