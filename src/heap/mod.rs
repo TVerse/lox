@@ -185,10 +185,14 @@ struct ObjStringInternal {
 impl ObjString {
     fn new_copied(s: &str, alloc: Arc<Allocator>) -> Self {
         let len = s.len();
-        let str_ptr = unsafe {
-            let str_ptr = alloc.allocate(Layout::array::<u8>(len).unwrap());
-            ptr::copy(s.as_ptr(), str_ptr.as_ptr(), len);
-            str_ptr
+        let str_ptr = if len != 0 {
+            unsafe {
+                let str_ptr = alloc.allocate(Layout::array::<u8>(len).unwrap());
+                ptr::copy(s.as_ptr(), str_ptr.as_ptr(), len);
+                str_ptr
+            }
+        } else {
+            NonNull::dangling()
         };
 
         let hash = Self::make_hash(str_ptr, len);
@@ -230,15 +234,23 @@ impl ObjString {
         let a = unsafe { &*a.as_ptr() };
         let b = unsafe { &*b.as_ptr() };
         let len = a.internal.len + b.internal.len;
-        let str_ptr = unsafe {
-            let str_ptr = a.object.alloc.allocate(Layout::array::<u8>(len).unwrap());
-            ptr::copy(a.internal.ptr.as_ptr(), str_ptr.as_ptr(), a.internal.len);
-            ptr::copy(
-                b.internal.ptr.as_ptr(),
-                str_ptr.as_ptr().add(a.internal.len),
-                b.internal.len,
-            );
-            str_ptr
+        let str_ptr = if len == 0 {
+            NonNull::dangling()
+        } else {
+            unsafe {
+                let str_ptr = a.object.alloc.allocate(Layout::array::<u8>(len).unwrap());
+                if a.internal.len != 0 {
+                    ptr::copy(a.internal.ptr.as_ptr(), str_ptr.as_ptr(), a.internal.len);
+                }
+                if b.internal.len != 0 {
+                    ptr::copy(
+                        b.internal.ptr.as_ptr(),
+                        str_ptr.as_ptr().add(a.internal.len),
+                        b.internal.len,
+                    );
+                }
+                str_ptr
+            }
         };
         let hash = Self::make_hash(str_ptr, len);
         Self {
@@ -256,9 +268,11 @@ impl Drop for ObjString {
     fn drop(&mut self) {
         unsafe {
             let len = self.internal.len;
-            self.object
-                .alloc
-                .dealloc(self.internal.ptr, Layout::array::<u8>(len).unwrap());
+            if len != 0 {
+                self.object
+                    .alloc
+                    .dealloc(self.internal.ptr, Layout::array::<u8>(len).unwrap());
+            }
             self.internal.ptr = NonNull::dangling();
         }
     }

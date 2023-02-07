@@ -102,7 +102,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 Ok(token) => Ok(token),
                 Err(e) => Err(CompileError::ScanError(e).into()),
             },
-            None => Err(CompileError::GeneralError("Unexpected end of stream".to_string()).into()),
+            None => Err(ParseError::GeneralError("Unexpected end of stream".to_string()).into()),
         }
     }
 
@@ -112,13 +112,19 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 Ok(token) => Ok(token),
                 Err(e) => Err(CompileError::ScanError(e.clone()).into()),
             },
-            None => Err(CompileError::GeneralError("Unexpected end of stream".to_string()).into()),
+            None => Err(ParseError::GeneralError("Unexpected end of stream".to_string()).into()),
         }
     }
 
     fn compile(&mut self) -> CompileResult<()> {
-        while let Some(Ok(_)) = self.iter.peek() {
-            self.declaration()?;
+        while let Some(peeked) = self.iter.peek() {
+            match peeked {
+                Ok(_) => self.declaration()?,
+                Err(e) => {
+                    self.errors.push(e.clone().into());
+                    break;
+                }
+            }
         }
 
         if self.errors.errors.is_empty() {
@@ -183,9 +189,12 @@ impl<'a, 'b> Compiler<'a, 'b> {
         {
             self.define_variable(constant_index, line)
         } else {
-            errors.push(CompileError::GeneralError(
-                "Missing semicolon after variable declaration".to_string(),
-            ));
+            errors.push(
+                ParseError::GeneralError(
+                    "Missing semicolon after variable declaration".to_string(),
+                )
+                .into(),
+            );
             Err(errors)
         }
     }
@@ -198,7 +207,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
                     let line = token.line;
                     match token.contents {
                         TokenContents::Identifier(id) => {
-                            self.declare_variable(id)?;
+                            self.declare_variable(id, line)?;
                             if self.scope_depth > 0 {
                                 Ok(None)
                             } else {
@@ -206,9 +215,10 @@ impl<'a, 'b> Compiler<'a, 'b> {
                             }
                         }
                         _ => {
-                            errors.push(CompileError::GeneralError(format!(
-                                "Expected identifier after 'var' on line {line}"
-                            )));
+                            errors.push(
+                                ParseError::NotAVariableName(line, token.contents.to_string())
+                                    .into(),
+                            );
                             Err(errors)
                         }
                     }
@@ -219,9 +229,12 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 }
             },
             None => {
-                errors.push(CompileError::GeneralError(
-                    "Unexpected end of stream after 'var' declaration".to_string(),
-                ));
+                errors.push(
+                    ParseError::GeneralError(
+                        "Unexpected end of stream after 'var' declaration".to_string(),
+                    )
+                    .into(),
+                );
                 Err(errors)
             }
         }
@@ -230,10 +243,10 @@ impl<'a, 'b> Compiler<'a, 'b> {
     fn identifier_constant(&mut self, id: &str) -> CompileResult<u8> {
         self.chunk
             .add_constant(Value::Obj(self.heap_manager.create_string_copied(id)))
-            .ok_or_else(|| CompileErrors::from(CompileError::TooManyConstants))
+            .ok_or_else(|| CompileErrors::from(ParseError::TooManyConstants))
     }
 
-    fn declare_variable(&mut self, name: &'a str) -> CompileResult<()> {
+    fn declare_variable(&mut self, name: &'a str, line: usize) -> CompileResult<()> {
         if let Some(local_depth) = NonZeroUsize::new(self.scope_depth) {
             for local in self
                 .locals
@@ -242,10 +255,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 .filter(|l| l.depth == Some(local_depth))
             {
                 if name == local.name {
-                    return Err(CompileError::GeneralError(format!(
-                        "Already a variable with name {name}"
-                    ))
-                    .into());
+                    return Err(ParseError::DuplicateLocal(line, name.to_string()).into());
                 }
             }
             self.add_local(name)
@@ -257,7 +267,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
     fn add_local(&mut self, name: &'a str) -> CompileResult<()> {
         self.locals
             .try_push(Local { name, depth: None })
-            .map_err(|_| CompileError::GeneralError("Too many locals".to_string()).into())
+            .map_err(|_| ParseError::GeneralError("Too many locals".to_string()).into())
     }
 
     fn define_variable(&mut self, idx: Option<u8>, line: usize) -> CompileResult<()> {
@@ -292,10 +302,10 @@ impl<'a, 'b> Compiler<'a, 'b> {
                     self.chunk.add_opcode(Opcode::Print, line);
                     Ok(())
                 } else {
-                    errors.push(CompileError::GeneralError(format!(
-                        "Missing semicolon around line {}",
-                        line
-                    )));
+                    errors.push(
+                        ParseError::GeneralError(format!("Missing semicolon around line {}", line))
+                            .into(),
+                    );
                     Err(errors)
                 }
             }
@@ -340,7 +350,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         match self.next_token() {
             Ok(token) if token.contents == TokenContents::RightBrace => Ok(()),
             _ => Err(
-                CompileError::GeneralError("Didn't find matching closing brace".to_string()).into(),
+                ParseError::GeneralError("Didn't find matching closing brace".to_string()).into(),
             ),
         }
     }
@@ -355,7 +365,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
             self.chunk.add_opcode(Opcode::Pop, line);
             Ok(())
         } else {
-            Err(CompileError::GeneralError(format!(
+            Err(ParseError::GeneralError(format!(
                 "Missing semicolon around line {}",
                 estimated_line
             ))
@@ -379,10 +389,10 @@ impl<'a, 'b> Compiler<'a, 'b> {
                             errors.extend(e);
                         }
                     } else {
-                        errors.push(CompileError::GeneralError(format!(
-                            "No parser found for token {token:?} and type {:?}",
-                            OperatorType::Prefix
-                        )))
+                        errors.push(
+                            ParseError::NoPrefixParser(token.line, token.contents.to_string())
+                                .into(),
+                        )
                     }
                 }
                 Err(e) => {
@@ -395,25 +405,21 @@ impl<'a, 'b> Compiler<'a, 'b> {
         while let Some(token) = self.iter.peek() {
             match token {
                 Ok(token) => {
+                    let can_assign = min_bp <= BindingPower::Assignment;
                     if let Some((infix_rule, infix_bp)) = get_parser(token, OperatorType::Infix) {
                         if infix_bp < min_bp {
                             break;
                         }
                         let token = self.iter.next().unwrap().unwrap();
 
-                        let can_assign = min_bp <= BindingPower::Assignment;
                         if let Err(e) = infix_rule(self, &token, can_assign) {
                             errors.extend(e);
                         }
+                    } else {
                         let peek = self.peek_token()?;
                         if can_assign && peek.contents == TokenContents::Equal {
-                            errors.push(CompileError::GeneralError(format!(
-                                "Found invalid = around line {}",
-                                peek.line
-                            )));
-                            break;
+                            errors.push(ParseError::InvalidAssignmentTarget(peek.line).into());
                         }
-                    } else {
                         break;
                     }
                 }
@@ -449,7 +455,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         let constant = self
             .chunk
             .add_constant(Value::Number(number))
-            .ok_or_else(|| CompileErrors::from(CompileError::TooManyConstants))?;
+            .ok_or_else(|| CompileErrors::from(ParseError::TooManyConstants))?;
         self.chunk
             .add_opcode_and_operand(Opcode::Constant, constant, token.line);
         Ok(())
@@ -481,7 +487,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
             Some(Ok(token)) => match token.contents {
                 TokenContents::RightParen => {}
                 _ => {
-                    return Err(CompileError::GeneralError(
+                    return Err(ParseError::GeneralError(
                         "Unmatched opening parenthesis".to_owned(),
                     )
                     .into());
@@ -489,7 +495,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
             },
             _ => {
                 return Err(
-                    CompileError::GeneralError("Unmatched opening parenthesis".to_owned()).into(),
+                    ParseError::GeneralError("Unmatched opening parenthesis".to_owned()).into(),
                 );
             }
         }
@@ -544,7 +550,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 let constant = self
                     .chunk
                     .add_constant(value)
-                    .ok_or_else(|| CompileErrors::from(CompileError::TooManyConstants))?;
+                    .ok_or_else(|| CompileErrors::from(ParseError::TooManyConstants))?;
                 self.chunk
                     .add_opcode_and_operand(Opcode::Constant, constant, token.line)
             }
@@ -556,7 +562,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
     fn parse_identifier(&mut self, token: &Token, can_assign: bool) -> CompileResult<()> {
         match token.contents {
             TokenContents::Identifier(id) => {
-                let (get_op, set_op, idx) = if let Some(idx) = self.resolve_local(id)? {
+                let (get_op, set_op, idx) = if let Some(idx) = self.resolve_local(id, token.line)? {
                     (Opcode::GetLocal, Opcode::SetLocal, idx)
                 } else {
                     let idx = self.identifier_constant(id)?;
@@ -574,15 +580,18 @@ impl<'a, 'b> Compiler<'a, 'b> {
         Ok(())
     }
 
-    fn resolve_local(&mut self, name: &str) -> CompileResult<Option<u8>> {
+    fn resolve_local(&mut self, name: &str, line: usize) -> CompileResult<Option<u8>> {
         for (idx, local) in self
             .locals
             .iter()
             .enumerate()
-            .filter(|(_, l)| l.depth.is_some())
+            // .filter(|(_, l)| l.depth.is_some())
             .rev()
         {
             if local.name == name {
+                if local.depth.is_none() {
+                    return Err(ParseError::LocalInOwnInitializer(line, name.to_string()).into());
+                }
                 return Ok(Some(idx as u8));
             }
         }
@@ -695,12 +704,44 @@ impl From<CompileError> for CompileErrors {
     }
 }
 
+impl From<ParseError> for CompileErrors {
+    fn from(value: ParseError) -> Self {
+        let mut this = CompileErrors::new();
+        this.push(value.into());
+        this
+    }
+}
+
+impl From<ScanError> for CompileErrors {
+    fn from(value: ScanError) -> Self {
+        let mut this = CompileErrors::new();
+        this.push(value.into());
+        this
+    }
+}
+
 #[derive(Error, Debug, Clone)]
 pub enum CompileError {
     #[error(transparent)]
     ScanError(#[from] ScanError),
-    #[error("Too many constants")]
+    #[error(transparent)]
+    ParseError(#[from] ParseError),
+}
+
+#[derive(Error, Debug, Clone)]
+pub enum ParseError {
+    #[error("Too many constants in one chunk.")]
     TooManyConstants,
-    #[error("Compile error: {0}")]
+    #[error("[line {0}] Error at '=': Invalid assignment target.")]
+    InvalidAssignmentTarget(usize),
+    #[error("[line {0}] Error at '{1}': Expect expression.")]
+    NoPrefixParser(usize, String),
+    #[error("[line {0}] Error at '{1}': Can't read local variable in its own initializer.")]
+    LocalInOwnInitializer(usize, String),
+    #[error("[line {0}] Error at '{1}': Expect variable name.")]
+    NotAVariableName(usize, String),
+    #[error("[line {0}] Error at '{1}': Already a variable with this name in this scope.")]
+    DuplicateLocal(usize, String),
+    #[error("Compile error: {0}.")]
     GeneralError(String),
 }

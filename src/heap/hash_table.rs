@@ -1,7 +1,6 @@
 use crate::heap::allocator::Allocator;
 use crate::heap::{BoxedObjString, ObjString};
 use crate::value::Value;
-use log::debug;
 use std::alloc::Layout;
 use std::fmt::{Debug, Formatter};
 use std::ptr::NonNull;
@@ -131,7 +130,6 @@ impl HashTable {
 
     fn adjust_capacity(&mut self, new_capacity: usize) {
         unsafe {
-            debug!("start hashmap allocate");
             let entries = self
                 .alloc
                 .allocate(Layout::array::<Entry>(new_capacity).unwrap())

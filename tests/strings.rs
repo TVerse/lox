@@ -21,6 +21,26 @@ fn strings_2() {
 }
 
 #[test]
+fn empty_string() {
+    let source = r#"print "Hello " + ""+ "World!";"#;
+    let mut out = Vec::new();
+    interpret(source, &mut out).unwrap();
+    let out = String::from_utf8(out).unwrap();
+    let expected = "Hello World!\n";
+    assert_eq!(&out, expected);
+}
+
+#[test]
+fn empty_string_concat() {
+    let source = r#"print "" + ""+ "" + "";"#;
+    let mut out = Vec::new();
+    interpret(source, &mut out).unwrap();
+    let out = String::from_utf8(out).unwrap();
+    let expected = "\n";
+    assert_eq!(&out, expected);
+}
+
+#[test]
 fn strings_compare_1() {
     let source = r#"print "Hello" == "World!";"#;
     let mut out = Vec::new();
