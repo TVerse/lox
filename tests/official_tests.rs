@@ -183,19 +183,19 @@ test_bundled!("bool":
 //     "undefined",
 // );
 
-// test_bundled!("for":
+test_bundled!("for":
 //     "class_in_body",
 //     "closure_in_body",
 //     "fun_in_body",
 //     "return_closure",
 //     "return_inside",
-//     "scope",
-//     "statement_condition",
-//     "statement_increment",
-//     "statement_initializer",
-//     "syntax",
-//     "var_in_body",
-// );
+    "scope",
+    "statement_condition",
+    "statement_increment",
+    "statement_initializer",
+    // "syntax",
+    "var_in_body",
+);
 
 // test_bundled!("function":
 //     "body_must_be_block",

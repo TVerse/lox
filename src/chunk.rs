@@ -59,6 +59,10 @@ impl Chunk {
         }
     }
 
+    pub fn line_for(&self, ip: usize) -> usize {
+        self.lines[ip]
+    }
+
     fn add_byte(&mut self, byte: u8, line: usize) {
         self.code.push(byte);
         self.lines.push(line);
@@ -90,7 +94,7 @@ impl Chunk {
         match jump {
             None => return Err("Too much code to jump over.".to_string()),
             Some(j) if j > u16::MAX as usize => {
-                return Err("Too much code to jump over.".to_string())
+                return Err("Too much code to jump over.".to_string());
             }
             Some(jump) => {
                 let first_byte = ((jump >> 8) & 0xFF) as u8;
@@ -298,7 +302,7 @@ impl Debug for Chunk {
         writeln!(f, "{}", self.disassemble())?;
         writeln!(f, "Constants:")?;
         for (i, c) in self.constants.iter().enumerate() {
-            writeln!(f, "{i:04}: {c:?}")?;
+            writeln!(f, "{i:04}: {c}")?;
         }
         Ok(())
     }
