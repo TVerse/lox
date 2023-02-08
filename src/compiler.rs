@@ -627,6 +627,34 @@ impl<'a, 'b> Compiler<'a, 'b> {
         Ok(())
     }
 
+    fn parse_and(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
+        match token.contents {
+            TokenContents::And => {
+                let end_jump = self.chunk.add_dummy_jump(Opcode::JumpIfFalse, token.line);
+                self.chunk.add_opcode(Opcode::Pop, token.line);
+                self.expression_bp(BindingPower::And)?;
+                self.patch_jump(end_jump)?;
+            }
+            _ => unreachable!("Unexpected 'and' token, got {token:?}"),
+        }
+        Ok(())
+    }
+
+    fn parse_or(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
+        match token.contents {
+            TokenContents::Or => {
+                let else_jump = self.chunk.add_dummy_jump(Opcode::JumpIfFalse, token.line);
+                let end_jump = self.chunk.add_dummy_jump(Opcode::Jump, token.line);
+                self.patch_jump(else_jump)?;
+                self.chunk.add_opcode(Opcode::Pop, token.line);
+                self.expression_bp(BindingPower::Or)?;
+                self.patch_jump(end_jump)?;
+            }
+            _ => unreachable!("Unexpected 'or' token, got {token:?}"),
+        }
+        Ok(())
+    }
+
     fn resolve_local(&mut self, name: &str, line: usize) -> CompileResult<Option<u8>> {
         for (idx, local) in self
             .locals
@@ -685,6 +713,8 @@ fn get_parser<'a, 'b, 'c>(
         (TokenContents::Identifier(_), OperatorType::Prefix) => {
             Some((Compiler::parse_identifier, BindingPower::None))
         }
+        (TokenContents::And, OperatorType::Infix) => Some((Compiler::parse_and, BindingPower::And)),
+        (TokenContents::Or, OperatorType::Infix) => Some((Compiler::parse_or, BindingPower::Or)),
         _ => None,
     }
 }

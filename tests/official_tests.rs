@@ -246,12 +246,12 @@ test_bundled!("if":
 // "too_many_upvalues"
 // );
 
-// test_bundled!("logical_operator":
-//     "and",
-//     "and_truth",
-//     "or",
-//     "or_truth",
-// );
+test_bundled!("logical_operator":
+    "and",
+    "and_truth",
+    "or",
+    "or_truth",
+);
 
 // test_bundled!("method":
 //     "arity",
