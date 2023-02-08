@@ -320,6 +320,10 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 let _ = self.next_token()?;
                 self.if_statement()
             }
+            TokenContents::While => {
+                let _ = self.next_token()?;
+                self.while_statement()
+            }
             _ => self.expression_statement(line),
         }
     }
@@ -392,6 +396,38 @@ impl<'a, 'b> Compiler<'a, 'b> {
         self.patch_jump(else_jump)
     }
 
+    fn while_statement(&mut self) -> CompileResult<()> {
+        let loop_start = self.chunk.get_loop_start();
+        match self.next_token() {
+            Ok(token) if token.contents == TokenContents::LeftParen => (),
+            _ => {
+                return Err(
+                    ParseError::GeneralError("Expected '(' after 'while'".to_string()).into(),
+                )
+            }
+        }
+        self.expression()?;
+        let token = match self.next_token() {
+            Ok(token) if token.contents == TokenContents::RightParen => token,
+            _ => {
+                return Err(
+                    ParseError::GeneralError("Expected ')' after condition".to_string()).into(),
+                )
+            }
+        };
+        let line = token.line;
+        let exit_jump = self.chunk.add_dummy_jump(Opcode::JumpIfFalse, line);
+        self.chunk.add_opcode(Opcode::Pop, line);
+        self.statement()?;
+
+        self.emit_loop(loop_start, line)?;
+
+        self.patch_jump(exit_jump)?;
+        self.chunk.add_opcode(Opcode::Pop, line);
+
+        Ok(())
+    }
+
     fn emit_jump(&mut self, opcode: Opcode, line: usize) -> CompileResult<usize> {
         Ok(self.chunk.add_dummy_jump(opcode, line))
     }
@@ -399,6 +435,12 @@ impl<'a, 'b> Compiler<'a, 'b> {
     fn patch_jump(&mut self, target: usize) -> CompileResult<()> {
         self.chunk
             .patch_jump(target)
+            .map_err(|e| ParseError::GeneralError(e).into())
+    }
+
+    fn emit_loop(&mut self, loop_start: usize, line: usize) -> CompileResult<()> {
+        self.chunk
+            .emit_loop(loop_start, line)
             .map_err(|e| ParseError::GeneralError(e).into())
     }
 

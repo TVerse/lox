@@ -391,12 +391,12 @@ test_bundled!("variable":
     "use_this_as_var",
 );
 
-// test_bundled!("while":
-//     "class_in_body",
-//     "closure_in_body",
-//     "fun_in_body",
-//     "return_closure",
-//     "return_inside",
-//     "syntax",
-//     "var_in_body",
-// );
+test_bundled!("while":
+    // "class_in_body",
+    // "closure_in_body",
+    // "fun_in_body",
+    // "return_closure",
+    // "return_inside",
+    "syntax",
+    "var_in_body",
+);

@@ -174,6 +174,10 @@ impl<'a, W: Write> VM<'a, W> {
                     let offset = self.read_short(chunk)?;
                     self.ip += offset as usize;
                 }
+                Opcode::Loop => {
+                    let offset = self.read_short(chunk)?;
+                    self.ip -= offset as usize;
+                }
             }
         }
 

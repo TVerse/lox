@@ -33,6 +33,7 @@ pub enum Opcode {
     SetLocal,
     JumpIfFalse,
     Jump,
+    Loop,
 }
 
 impl Opcode {
@@ -98,6 +99,31 @@ impl Chunk {
                 self.code[target + 1] = second_byte;
             }
         }
+        Ok(())
+    }
+
+    pub fn get_loop_start(&self) -> usize {
+        self.code.len()
+    }
+
+    pub fn emit_loop(&mut self, loop_start: usize, line: usize) -> Result<(), String> {
+        self.add_opcode(Opcode::Loop, line);
+        let offset = self
+            .code
+            .len()
+            .checked_sub(loop_start)
+            .and_then(|i| i.checked_add(2));
+        match offset {
+            None => return Err("Loop body too large.".to_string()),
+            Some(j) if j > u16::MAX as usize => return Err("Loop body too large.".to_string()),
+            Some(jump) => {
+                let first_byte = ((jump >> 8) & 0xFF) as u8;
+                let second_byte = (jump & 0xFF) as u8;
+                self.add_byte(first_byte, line);
+                self.add_byte(second_byte, line);
+            }
+        }
+
         Ok(())
     }
 
@@ -193,7 +219,7 @@ impl Chunk {
                     Opcode::GetLocal | Opcode::SetLocal => {
                         self.byte_instruction(opcode, iter.next().map(code))
                     }
-                    Opcode::JumpIfFalse | Opcode::Jump => {
+                    Opcode::JumpIfFalse | Opcode::Jump | Opcode::Loop => {
                         self.short_instruction(opcode, iter.next().map(code), iter.next().map(code))
                     }
                 }
