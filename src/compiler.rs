@@ -182,20 +182,20 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 _ => self.chunk.add_opcode(Opcode::Nil, token.line),
             }
         }
-        if let Some(Ok(Token {
-            contents: TokenContents::Semicolon,
-            line,
-        })) = self.iter.next()
-        {
-            self.define_variable(constant_index, line)
-        } else {
-            errors.push(
-                ParseError::GeneralError(
-                    "Missing semicolon after variable declaration".to_string(),
-                )
-                .into(),
-            );
-            Err(errors)
+        match self.iter.next() {
+            Some(Ok(Token {
+                contents: TokenContents::Semicolon,
+                line,
+            })) => self.define_variable(constant_index, line),
+            Some(Ok(token)) => {
+                let line = token.line;
+                errors.push(ParseError::MissingSemicolon(line, token.contents.to_string()).into());
+                Err(errors)
+            }
+            _ => Err(ParseError::GeneralError(
+                "Missing semicolon after variable declaration".to_string(),
+            )
+            .into()),
         }
     }
 
@@ -294,42 +294,62 @@ impl<'a, 'b> Compiler<'a, 'b> {
             TokenContents::Print => {
                 let _ = self.next_token();
                 self.expression()?;
-                if let Some(Ok(Token {
-                    contents: TokenContents::Semicolon,
-                    line,
-                })) = self.iter.next()
-                {
-                    self.chunk.add_opcode(Opcode::Print, line);
-                    Ok(())
-                } else {
-                    errors.push(
-                        ParseError::GeneralError(format!("Missing semicolon around line {}", line))
+                match self.iter.next() {
+                    Some(Ok(Token {
+                        contents: TokenContents::Semicolon,
+                        line,
+                    })) => {
+                        self.chunk.add_opcode(Opcode::Print, line);
+                        Ok(())
+                    }
+                    Some(Ok(token)) => {
+                        errors.push(
+                            ParseError::MissingSemicolon(token.line, token.contents.to_string())
+                                .into(),
+                        );
+                        Err(errors)
+                    }
+                    _ => {
+                        errors.push(
+                            ParseError::GeneralError(format!(
+                                "Missing semicolon around line {}",
+                                line
+                            ))
                             .into(),
-                    );
-                    Err(errors)
+                        );
+                        Err(errors)
+                    }
                 }
             }
             TokenContents::LeftBrace => {
                 let _ = self.next_token()?;
-                self.begin_scope();
-                self.block()?;
-                self.end_scope(line);
+                self.scoped(|s| s.block())?;
                 Ok(())
+            }
+            TokenContents::If => {
+                let _ = self.next_token()?;
+                self.if_statement()
+            }
+            TokenContents::While => {
+                let _ = self.next_token()?;
+                self.while_statement()
+            }
+            TokenContents::For => {
+                let _ = self.next_token()?;
+                self.for_statement()
             }
             _ => self.expression_statement(line),
         }
     }
 
-    fn begin_scope(&mut self) {
+    fn scoped(&mut self, f: impl FnOnce(&mut Self) -> CompileResult<()>) -> CompileResult<()> {
         self.scope_depth += 1;
-    }
-
-    fn end_scope(&mut self, line: usize) {
+        let res = f(self);
         self.scope_depth -= 1;
         while let Some(last) = self.locals.last() {
             if let Some(local_depth) = last.depth {
                 if local_depth.get() > self.scope_depth {
-                    self.chunk.add_opcode(Opcode::Pop, line);
+                    self.chunk.add_opcode(Opcode::Pop, 0);
                     let _ = self.locals.pop();
                 } else {
                     break;
@@ -338,6 +358,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 break;
             }
         }
+        res
     }
 
     fn block(&mut self) -> CompileResult<()> {
@@ -355,21 +376,196 @@ impl<'a, 'b> Compiler<'a, 'b> {
         }
     }
 
+    fn if_statement(&mut self) -> CompileResult<()> {
+        match self.next_token() {
+            Ok(token) if token.contents == TokenContents::LeftParen => (),
+            _ => {
+                return Err(ParseError::GeneralError("Expected '(' after 'if'".to_string()).into());
+            }
+        }
+        self.expression()?;
+        let token = match self.next_token() {
+            Ok(token) if token.contents == TokenContents::RightParen => token,
+            _ => {
+                return Err(
+                    ParseError::GeneralError("Expected ')' after condition".to_string()).into(),
+                );
+            }
+        };
+        let line = token.line;
+        // TODO fix the line numbers here
+        let then_jump = self.emit_jump(Opcode::JumpIfFalse, line)?;
+        self.chunk.add_opcode(Opcode::Pop, line);
+        self.statement()?;
+        let else_jump = self.emit_jump(Opcode::Jump, line)?;
+        self.patch_jump(then_jump)?;
+        self.chunk.add_opcode(Opcode::Pop, line);
+        if let Some(Ok(t)) = self.iter.peek() {
+            if t.contents == TokenContents::Else {
+                let _ = self.next_token()?;
+                self.statement()?;
+            }
+        }
+        self.patch_jump(else_jump)
+    }
+
+    fn while_statement(&mut self) -> CompileResult<()> {
+        let loop_start = self.chunk.get_loop_start();
+        match self.next_token() {
+            Ok(token) if token.contents == TokenContents::LeftParen => (),
+            _ => {
+                return Err(
+                    ParseError::GeneralError("Expected '(' after 'while'".to_string()).into(),
+                );
+            }
+        }
+        self.expression()?;
+        let token = match self.next_token() {
+            Ok(token) if token.contents == TokenContents::RightParen => token,
+            _ => {
+                return Err(
+                    ParseError::GeneralError("Expected ')' after condition".to_string()).into(),
+                );
+            }
+        };
+        let line = token.line;
+        let exit_jump = self.emit_jump(Opcode::JumpIfFalse, line)?;
+        self.chunk.add_opcode(Opcode::Pop, line);
+        self.statement()?;
+
+        self.emit_loop(loop_start, line)?;
+
+        self.patch_jump(exit_jump)?;
+        self.chunk.add_opcode(Opcode::Pop, line);
+
+        Ok(())
+    }
+
+    fn for_statement(&mut self) -> CompileResult<()> {
+        self.scoped(|s| {
+            match s.next_token() {
+                Ok(token) if token.contents == TokenContents::LeftParen => (),
+                _ => {
+                    return Err(
+                        ParseError::GeneralError("Expected '(' after 'for'".to_string()).into(),
+                    );
+                }
+            }
+            match s.peek_token() {
+                Ok(token) if token.contents == TokenContents::Semicolon => {
+                    s.next_token()?;
+                }
+                Ok(token) if token.contents == TokenContents::Var => {
+                    s.next_token()?;
+                    s.var_declaration()?;
+                }
+                Ok(token) => {
+                    let line = token.line;
+                    s.expression_statement(line)?;
+                }
+                _ => return Err(ParseError::GeneralError("Expected ';'".to_string()).into()),
+            }
+
+            let loop_start = s.chunk.get_loop_start();
+
+            let exit_jump = match s.peek_token() {
+                Ok(token) if token.contents == TokenContents::Semicolon => {
+                    let _ = s.next_token()?;
+                    None
+                }
+                Ok(token) => {
+                    let line = token.line;
+                    s.expression()?;
+                    match s.next_token() {
+                        Ok(token) if token.contents == TokenContents::Semicolon => (),
+                        _ => {
+                            return Err(ParseError::GeneralError("Expected ';'".to_string()).into());
+                        }
+                    };
+                    let exit_jump = s.emit_jump(Opcode::JumpIfFalse, line)?;
+                    s.chunk.add_opcode(Opcode::Pop, line);
+                    Some(exit_jump)
+                }
+                _ => return Err(ParseError::GeneralError("Expected ';'".to_string()).into()),
+            };
+            let (line, loop_start) = match s.peek_token() {
+                Ok(token) if token.contents == TokenContents::RightParen => {
+                    let token = s.next_token()?;
+                    (token.line, loop_start)
+                }
+                Ok(token) => {
+                    let line = token.line;
+                    let body_jump = s.emit_jump(Opcode::Jump, line)?;
+                    let increment_start = s.chunk.get_loop_start();
+                    s.expression()?;
+                    s.chunk.add_opcode(Opcode::Pop, line);
+                    match s.next_token() {
+                        Ok(token) if token.contents == TokenContents::RightParen => (),
+                        _ => {
+                            return Err(ParseError::GeneralError(
+                                "Expected ')' after for clauses".to_string(),
+                            )
+                            .into());
+                        }
+                    };
+                    s.emit_loop(loop_start, line)?;
+                    s.patch_jump(body_jump)?;
+
+                    (line, increment_start)
+                }
+                _ => {
+                    return Err(ParseError::GeneralError(
+                        "Expected ')' after condition".to_string(),
+                    )
+                    .into());
+                }
+            };
+            s.statement()?;
+
+            s.emit_loop(loop_start, line)?;
+
+            if let Some(exit_jump) = exit_jump {
+                s.patch_jump(exit_jump)?;
+                s.chunk.add_opcode(Opcode::Pop, line);
+            }
+            Ok(())
+        })
+    }
+
+    fn emit_jump(&mut self, opcode: Opcode, line: usize) -> CompileResult<usize> {
+        Ok(self.chunk.add_dummy_jump(opcode, line))
+    }
+
+    fn patch_jump(&mut self, target: usize) -> CompileResult<()> {
+        self.chunk
+            .patch_jump(target)
+            .map_err(|e| ParseError::GeneralError(e).into())
+    }
+
+    fn emit_loop(&mut self, loop_start: usize, line: usize) -> CompileResult<()> {
+        self.chunk
+            .emit_loop(loop_start, line)
+            .map_err(|e| ParseError::GeneralError(e).into())
+    }
+
     fn expression_statement(&mut self, estimated_line: usize) -> CompileResult<()> {
         self.expression()?;
-        if let Ok(Token {
-            contents: TokenContents::Semicolon,
-            line,
-        }) = self.next_token()
-        {
-            self.chunk.add_opcode(Opcode::Pop, line);
-            Ok(())
-        } else {
-            Err(ParseError::GeneralError(format!(
+        match self.next_token() {
+            Ok(Token {
+                contents: TokenContents::Semicolon,
+                line,
+            }) => {
+                self.chunk.add_opcode(Opcode::Pop, line);
+                Ok(())
+            }
+            Ok(token) => {
+                Err(ParseError::MissingSemicolon(token.line, token.contents.to_string()).into())
+            }
+            _ => Err(ParseError::GeneralError(format!(
                 "Missing semicolon around line {}",
                 estimated_line
             ))
-            .into())
+            .into()),
         }
     }
 
@@ -572,10 +768,39 @@ impl<'a, 'b> Compiler<'a, 'b> {
                     self.next_token()?;
                     self.expression()?;
                     self.chunk.add_opcode_and_operand(set_op, idx, token.line);
+                } else {
+                    self.chunk.add_opcode_and_operand(get_op, idx, token.line);
                 }
-                self.chunk.add_opcode_and_operand(get_op, idx, token.line);
             }
             _ => unreachable!("Unexpected identifier token, got {token:?}"),
+        }
+        Ok(())
+    }
+
+    fn parse_and(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
+        match token.contents {
+            TokenContents::And => {
+                let end_jump = self.emit_jump(Opcode::JumpIfFalse, token.line)?;
+                self.chunk.add_opcode(Opcode::Pop, token.line);
+                self.expression_bp(BindingPower::And)?;
+                self.patch_jump(end_jump)?;
+            }
+            _ => unreachable!("Unexpected 'and' token, got {token:?}"),
+        }
+        Ok(())
+    }
+
+    fn parse_or(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
+        match token.contents {
+            TokenContents::Or => {
+                let else_jump = self.emit_jump(Opcode::JumpIfFalse, token.line)?;
+                let end_jump = self.emit_jump(Opcode::Jump, token.line)?;
+                self.patch_jump(else_jump)?;
+                self.chunk.add_opcode(Opcode::Pop, token.line);
+                self.expression_bp(BindingPower::Or)?;
+                self.patch_jump(end_jump)?;
+            }
+            _ => unreachable!("Unexpected 'or' token, got {token:?}"),
         }
         Ok(())
     }
@@ -638,6 +863,8 @@ fn get_parser<'a, 'b, 'c>(
         (TokenContents::Identifier(_), OperatorType::Prefix) => {
             Some((Compiler::parse_identifier, BindingPower::None))
         }
+        (TokenContents::And, OperatorType::Infix) => Some((Compiler::parse_and, BindingPower::And)),
+        (TokenContents::Or, OperatorType::Infix) => Some((Compiler::parse_or, BindingPower::Or)),
         _ => None,
     }
 }
@@ -734,14 +961,18 @@ pub enum ParseError {
     TooManyConstants,
     #[error("[line {0}] Error at '=': Invalid assignment target.")]
     InvalidAssignmentTarget(usize),
-    #[error("[line {0}] Error at '{1}': Expect expression.")]
+    #[error("[line {0}] Error at '{1}': Expect expression. (prefix)")]
     NoPrefixParser(usize, String),
+    #[error("[line {0}] Error at '{1}': Expect expression. (infix)")]
+    NoInfixParser(usize, String),
     #[error("[line {0}] Error at '{1}': Can't read local variable in its own initializer.")]
     LocalInOwnInitializer(usize, String),
     #[error("[line {0}] Error at '{1}': Expect variable name.")]
     NotAVariableName(usize, String),
     #[error("[line {0}] Error at '{1}': Already a variable with this name in this scope.")]
     DuplicateLocal(usize, String),
+    #[error("[line {0}] Error at '{1}': Expect ';' after expression.")]
+    MissingSemicolon(usize, String),
     #[error("Compile error: {0}.")]
     GeneralError(String),
 }

@@ -65,24 +65,38 @@ impl<'a, W: Write> VM<'a, W> {
                 Opcode::Add => {
                     match (self.peek(0)?, self.peek(1)?) {
                         (Value::Number(_), Value::Number(_)) => {
-                            self.binary_op(|a, b| a + b, Value::Number)?
+                            self.binary_op(|a, b| a + b, Value::Number, chunk.line_for(self.ip))?
                         }
                         (Value::Obj(a), Value::Obj(b)) => {
                             match (a.as_objstring(), b.as_objstring()) {
                                 (Some(_), Some(_)) => self.concatenate()?,
-                                _ => return Err(RuntimeError::InvalidTypes("strings").into()),
+                                _ => {
+                                    return Err(RuntimeError::InvalidTypes(
+                                        chunk.line_for(self.ip),
+                                        "strings",
+                                    )
+                                    .into())
+                                }
                             }
                         }
                         _ => {
-                            return Err(
-                                RuntimeError::InvalidTypes("two numbers or two strings").into()
+                            return Err(RuntimeError::InvalidTypes(
+                                chunk.line_for(self.ip),
+                                "two numbers or two strings",
                             )
+                            .into())
                         }
                     };
                 }
-                Opcode::Subtract => self.binary_op(|a, b| a - b, Value::Number)?,
-                Opcode::Multiply => self.binary_op(|a, b| a * b, Value::Number)?,
-                Opcode::Divide => self.binary_op(|a, b| a / b, Value::Number)?,
+                Opcode::Subtract => {
+                    self.binary_op(|a, b| a - b, Value::Number, chunk.line_for(self.ip))?
+                }
+                Opcode::Multiply => {
+                    self.binary_op(|a, b| a * b, Value::Number, chunk.line_for(self.ip))?
+                }
+                Opcode::Divide => {
+                    self.binary_op(|a, b| a / b, Value::Number, chunk.line_for(self.ip))?
+                }
                 Opcode::True => self.push(Value::Boolean(true))?,
                 Opcode::False => self.push(Value::Boolean(false))?,
                 Opcode::Nil => self.push(Value::Nil)?,
@@ -95,8 +109,12 @@ impl<'a, W: Write> VM<'a, W> {
                     let a = self.pop()?;
                     self.push(Value::Boolean(a == b))?
                 }
-                Opcode::Greater => self.binary_op(|a, b| a > b, Value::Boolean)?,
-                Opcode::Less => self.binary_op(|a, b| a < b, Value::Boolean)?,
+                Opcode::Greater => {
+                    self.binary_op(|a, b| a > b, Value::Boolean, chunk.line_for(self.ip))?
+                }
+                Opcode::Less => {
+                    self.binary_op(|a, b| a < b, Value::Boolean, chunk.line_for(self.ip))?
+                }
                 Opcode::Print => {
                     let value = self.pop()?;
                     self.print_value(value)?;
@@ -164,6 +182,20 @@ impl<'a, W: Write> VM<'a, W> {
                     let slot = self.read_byte(chunk)?;
                     self.push(self.stack[slot as usize])?;
                 }
+                Opcode::JumpIfFalse => {
+                    let offset = self.read_short(chunk)?;
+                    if self.peek(0)?.is_falsey() {
+                        self.ip += offset as usize;
+                    }
+                }
+                Opcode::Jump => {
+                    let offset = self.read_short(chunk)?;
+                    self.ip += offset as usize;
+                }
+                Opcode::Loop => {
+                    let offset = self.read_short(chunk)?;
+                    self.ip -= offset as usize;
+                }
             }
         }
 
@@ -189,7 +221,13 @@ impl<'a, W: Write> VM<'a, W> {
         Ok(byte)
     }
 
-    fn read_constant<'b, 'c>(&'b mut self, chunk: &'c Chunk) -> VMResult<&'c Value> {
+    fn read_short(&mut self, chunk: &Chunk) -> VMResult<u16> {
+        let h = self.read_byte(chunk)?;
+        let l = self.read_byte(chunk)?;
+        Ok(((h as u16) << 8) | (l as u16))
+    }
+
+    fn read_constant<'c>(&mut self, chunk: &'c Chunk) -> VMResult<&'c Value> {
         let byte = self.read_byte(chunk)?;
         let constant = chunk
             .get_constant(byte)
@@ -209,13 +247,22 @@ impl<'a, W: Write> VM<'a, W> {
             .ok_or_else(|| IncorrectInvariantError::StackUnderflow.into())
     }
 
-    fn binary_op<T>(&mut self, f: impl Fn(f64, f64) -> T, v: fn(T) -> Value) -> VMResult<()> {
+    fn binary_op<T>(
+        &mut self,
+        f: impl Fn(f64, f64) -> T,
+        v: fn(T) -> Value,
+        line: usize,
+    ) -> VMResult<()> {
         let b = self.pop()?;
         let a = self.pop()?;
 
         let res = match (a, b) {
             (Value::Number(a), Value::Number(b)) => v(f(a, b)),
-            (_, _) => return Err(VMError::RuntimeError(RuntimeError::InvalidTypes("numbers"))),
+            (_, _) => {
+                return Err(VMError::RuntimeError(RuntimeError::InvalidTypes(
+                    line, "numbers",
+                )))
+            }
         };
         self.push(res)?;
         Ok(())
@@ -268,8 +315,8 @@ pub enum RuntimeError {
     InvalidInstructionPointer { pointer: usize, chunk_length: usize },
     #[error("stack overflow")]
     StackOverflow,
-    #[error("Invalid types: Operands must be {0}.")]
-    InvalidTypes(&'static str),
+    #[error("Invalid types: Operands must be {1}. [line {0}]")]
+    InvalidTypes(usize, &'static str),
     #[error("Invalid type: Operand must be a {0}.")]
     InvalidType(&'static str),
     #[error("Undefined variable '{0}'.")]
