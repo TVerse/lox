@@ -39,25 +39,25 @@ impl HeapManager {
         (*object.as_ptr()).next = old;
     }
 
-    pub fn create_string_copied(&mut self, s: &str) -> BoxedObject {
+    pub fn create_string_copied(&mut self, s: &str) -> Boxed<Object> {
         let str = ObjString::new_copied(s, self.alloc.clone());
         if let Some(ptr) = self.strings.get_string(NonNull::from(&str)) {
-            BoxedObject(ptr.0.cast::<Object>())
+            Boxed(ptr.0.cast::<Object>())
         } else {
             let ptr = unsafe { self.move_to_heap(str) };
-            self.strings.insert(BoxedObjString(ptr), Value::Nil);
-            BoxedObject(ptr.cast::<Object>())
+            self.strings.insert(Boxed(ptr), Value::Nil);
+            Boxed(ptr.cast::<Object>())
         }
     }
 
-    pub fn create_string_concat(&mut self, a: &BoxedObjString, b: &BoxedObjString) -> BoxedObject {
+    pub fn create_string_concat(&mut self, a: &Boxed<ObjString>, b: &Boxed<ObjString>) -> Boxed<Object> {
         let str = ObjString::concat(a.0, b.0);
         if let Some(ptr) = self.strings.get_string(NonNull::from(&str)) {
-            BoxedObject(ptr.0.cast::<Object>())
+            Boxed(ptr.0.cast::<Object>())
         } else {
             let ptr = unsafe { self.move_to_heap(str) };
-            self.strings.insert(BoxedObjString(ptr), Value::Nil);
-            BoxedObject(ptr.cast::<Object>())
+            self.strings.insert(Boxed(ptr), Value::Nil);
+            Boxed(ptr.cast::<Object>())
         }
     }
 
@@ -90,22 +90,37 @@ impl Drop for HeapManager {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct BoxedObject(NonNull<Object>);
+pub struct Boxed<T>(NonNull<T>);
 
-impl BoxedObject {
-    pub fn as_objstring(&self) -> Option<BoxedObjString> {
+impl<T> Clone for Boxed<T> {
+    fn clone(&self) -> Self {
+        Self(self.0)
+    }
+}
+
+impl<T> Copy for Boxed<T> {}
+
+impl<T> Debug for Boxed<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Boxed")
+            .field("ptr", &self.0)
+            .finish()
+    }
+}
+
+impl Boxed<Object> {
+    pub fn as_objstring(&self) -> Option<Boxed<ObjString>> {
         Object::as_objstring(self.0)
     }
 }
 
-impl Display for BoxedObject {
+impl Display for Boxed<Object> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", Object::to_string(self.0))
     }
 }
 
-impl PartialEq for BoxedObject {
+impl PartialEq for Boxed<Object> {
     fn eq(&self, other: &Self) -> bool {
         Object::eq(self.0, other.0)
     }
@@ -130,10 +145,10 @@ impl Object {
         }
     }
 
-    fn as_objstring(ptr: NonNull<Self>) -> Option<BoxedObjString> {
+    fn as_objstring(ptr: NonNull<Self>) -> Option<Boxed<ObjString>> {
         unsafe {
             match (*ptr.as_ptr()).obj_type {
-                ObjType::String => Some(BoxedObjString(ptr.cast::<ObjString>())),
+                ObjType::String => Some(Boxed(ptr.cast::<ObjString>())),
             }
         }
     }
@@ -141,7 +156,7 @@ impl Object {
     fn to_string(ptr: NonNull<Self>) -> String {
         unsafe {
             match (*ptr.as_ptr()).obj_type {
-                ObjType::String => (BoxedObjString(ptr.cast::<ObjString>())).to_string(),
+                ObjType::String => (Boxed(ptr.cast::<ObjString>())).to_string(),
             }
         }
     }
@@ -155,16 +170,13 @@ impl Object {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct BoxedObjString(NonNull<ObjString>);
-
-impl BoxedObjString {
+impl Boxed<ObjString> {
     pub fn as_str<'a>(&'a self) -> &'a str {
         ObjString::as_str::<'a>(self.0)
     }
 }
 
-impl Display for BoxedObjString {
+impl Display for Boxed<ObjString> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
     }

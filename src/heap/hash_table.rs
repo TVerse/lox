@@ -1,5 +1,5 @@
 use crate::heap::allocator::Allocator;
-use crate::heap::{BoxedObjString, ObjString};
+use crate::heap::{Boxed, ObjString};
 use crate::value::Value;
 use std::alloc::Layout;
 use std::fmt::{Debug, Formatter};
@@ -25,7 +25,7 @@ impl HashTable {
         }
     }
 
-    pub(in crate::heap) fn get_string(&self, key: NonNull<ObjString>) -> Option<BoxedObjString> {
+    pub(in crate::heap) fn get_string(&self, key: NonNull<ObjString>) -> Option<Boxed<ObjString>> {
         if self.count == 0 {
             return None;
         }
@@ -62,7 +62,7 @@ impl HashTable {
         self.capacity = 0;
     }
 
-    pub fn get(&self, key: BoxedObjString) -> Option<&Value> {
+    pub fn get(&self, key: Boxed<ObjString>) -> Option<&Value> {
         if self.count == 0 {
             return None;
         }
@@ -78,7 +78,7 @@ impl HashTable {
     }
 
     // TODO Option<Value>
-    pub fn delete(&mut self, key: BoxedObjString) -> bool {
+    pub fn delete(&mut self, key: Boxed<ObjString>) -> bool {
         if self.count == 0 {
             return false;
         }
@@ -97,7 +97,7 @@ impl HashTable {
     }
 
     // TODO Option<Value>
-    pub fn insert(&mut self, key: BoxedObjString, value: Value) -> bool {
+    pub fn insert(&mut self, key: Boxed<ObjString>, value: Value) -> bool {
         if (self.count + 1) as f64 > (self.capacity as f64) * Self::MAX_LOAD {
             let new_capacity = self.grow_capacity();
             self.adjust_capacity(new_capacity)
@@ -220,7 +220,7 @@ impl Debug for HashTable {
 }
 
 struct Entry {
-    key: Option<BoxedObjString>,
+    key: Option<Boxed<ObjString>>,
     value: Value,
 }
 

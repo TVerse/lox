@@ -1,4 +1,4 @@
-use crate::heap::BoxedObject;
+use crate::heap::{Boxed, Object};
 use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Clone, Copy)]
@@ -6,7 +6,7 @@ pub enum Value {
     Number(f64),
     Boolean(bool),
     Nil,
-    Obj(BoxedObject),
+    Obj(Boxed<Object>),
 }
 
 impl PartialEq for Value {
