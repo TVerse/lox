@@ -6,7 +6,7 @@ use crate::value::Value;
 use arrayvec::ArrayVec;
 use log::{error, trace};
 use num_enum::TryFromPrimitiveError;
-use std::io::{BufRead, Write};
+use std::io::Write;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -227,7 +227,7 @@ impl<'a, W: Write> VM<'a, W> {
         Ok(((h as u16) << 8) | (l as u16))
     }
 
-    fn read_constant<'b, 'c>(&'b mut self, chunk: &'c Chunk) -> VMResult<&'c Value> {
+    fn read_constant<'c>(&mut self, chunk: &'c Chunk) -> VMResult<&'c Value> {
         let byte = self.read_byte(chunk)?;
         let constant = chunk
             .get_constant(byte)

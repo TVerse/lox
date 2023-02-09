@@ -21,11 +21,11 @@ impl Allocator {
         match NonNull::new(ptr) {
             Some(ptr) => {
                 self.allocated.fetch_add(layout.size(), Ordering::Relaxed);
-                // trace!(
-                //     "Allocated {} bytes for a new total of {}",
-                //     layout.size(),
-                //     self.allocated.load(Ordering::Relaxed)
-                // );
+                trace!(
+                    "Allocated {} bytes for a new total of {}",
+                    layout.size(),
+                    self.allocated.load(Ordering::Relaxed)
+                );
                 ptr
             }
             None => handle_alloc_error(layout),
@@ -47,11 +47,11 @@ impl Allocator {
         match NonNull::new(ptr) {
             Some(ptr) => {
                 self.allocated.fetch_add(diff, Ordering::Relaxed);
-                // trace!(
-                //     "Reallocated {} extra bytes for a new total of {}",
-                //     diff,
-                //     self.allocated.load(Ordering::Relaxed)
-                // );
+                trace!(
+                    "Reallocated {} extra bytes for a new total of {}",
+                    diff,
+                    self.allocated.load(Ordering::Relaxed)
+                );
                 ptr
             }
             None => handle_alloc_error(new_layout),
@@ -61,10 +61,10 @@ impl Allocator {
     pub unsafe fn dealloc(&self, ptr: NonNull<u8>, layout: Layout) {
         self.allocated.fetch_sub(layout.size(), Ordering::Relaxed);
         dealloc(ptr.as_ptr(), layout);
-        // trace!(
-        //     "Deallocated {} bytes for a new total of {}",
-        //     layout.size(),
-        //     self.allocated.load(Ordering::Relaxed)
-        // );
+        trace!(
+            "Deallocated {} bytes for a new total of {}",
+            layout.size(),
+            self.allocated.load(Ordering::Relaxed)
+        );
     }
 }
