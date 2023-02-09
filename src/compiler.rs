@@ -182,20 +182,20 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 _ => self.chunk.add_opcode(Opcode::Nil, token.line),
             }
         }
-        if let Some(Ok(Token {
-            contents: TokenContents::Semicolon,
-            line,
-        })) = self.iter.next()
-        {
-            self.define_variable(constant_index, line)
-        } else {
-            errors.push(
-                ParseError::GeneralError(
-                    "Missing semicolon after variable declaration".to_string(),
-                )
-                .into(),
-            );
-            Err(errors)
+        match self.iter.next() {
+            Some(Ok(Token {
+                contents: TokenContents::Semicolon,
+                line,
+            })) => self.define_variable(constant_index, line),
+            Some(Ok(token)) => {
+                let line = token.line;
+                errors.push(ParseError::MissingSemicolon(line, token.contents.to_string()).into());
+                Err(errors)
+            }
+            _ => Err(ParseError::GeneralError(
+                "Missing semicolon after variable declaration".to_string(),
+            )
+            .into()),
         }
     }
 
@@ -294,19 +294,31 @@ impl<'a, 'b> Compiler<'a, 'b> {
             TokenContents::Print => {
                 let _ = self.next_token();
                 self.expression()?;
-                if let Some(Ok(Token {
-                    contents: TokenContents::Semicolon,
-                    line,
-                })) = self.iter.next()
-                {
-                    self.chunk.add_opcode(Opcode::Print, line);
-                    Ok(())
-                } else {
-                    errors.push(
-                        ParseError::GeneralError(format!("Missing semicolon around line {}", line))
+                match self.iter.next() {
+                    Some(Ok(Token {
+                        contents: TokenContents::Semicolon,
+                        line,
+                    })) => {
+                        self.chunk.add_opcode(Opcode::Print, line);
+                        Ok(())
+                    }
+                    Some(Ok(token)) => {
+                        errors.push(
+                            ParseError::MissingSemicolon(token.line, token.contents.to_string())
+                                .into(),
+                        );
+                        Err(errors)
+                    }
+                    _ => {
+                        errors.push(
+                            ParseError::GeneralError(format!(
+                                "Missing semicolon around line {}",
+                                line
+                            ))
                             .into(),
-                    );
-                    Err(errors)
+                        );
+                        Err(errors)
+                    }
                 }
             }
             TokenContents::LeftBrace => {
@@ -368,7 +380,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         match self.next_token() {
             Ok(token) if token.contents == TokenContents::LeftParen => (),
             _ => {
-                return Err(ParseError::GeneralError("Expected '(' after 'if'".to_string()).into())
+                return Err(ParseError::GeneralError("Expected '(' after 'if'".to_string()).into());
             }
         }
         self.expression()?;
@@ -377,7 +389,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
             _ => {
                 return Err(
                     ParseError::GeneralError("Expected ')' after condition".to_string()).into(),
-                )
+                );
             }
         };
         let line = token.line;
@@ -404,7 +416,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
             _ => {
                 return Err(
                     ParseError::GeneralError("Expected '(' after 'while'".to_string()).into(),
-                )
+                );
             }
         }
         self.expression()?;
@@ -413,7 +425,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
             _ => {
                 return Err(
                     ParseError::GeneralError("Expected ')' after condition".to_string()).into(),
-                )
+                );
             }
         };
         let line = token.line;
@@ -436,7 +448,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 _ => {
                     return Err(
                         ParseError::GeneralError("Expected '(' after 'for'".to_string()).into(),
-                    )
+                    );
                 }
             }
             match s.peek_token() {
@@ -467,7 +479,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
                     match s.next_token() {
                         Ok(token) if token.contents == TokenContents::Semicolon => (),
                         _ => {
-                            return Err(ParseError::GeneralError("Expected ';'".to_string()).into())
+                            return Err(ParseError::GeneralError("Expected ';'".to_string()).into());
                         }
                     };
                     let exit_jump = s.emit_jump(Opcode::JumpIfFalse, line)?;
@@ -493,7 +505,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
                             return Err(ParseError::GeneralError(
                                 "Expected ')' after for clauses".to_string(),
                             )
-                            .into())
+                            .into());
                         }
                     };
                     s.emit_loop(loop_start, line)?;
@@ -505,7 +517,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
                     return Err(ParseError::GeneralError(
                         "Expected ')' after condition".to_string(),
                     )
-                    .into())
+                    .into());
                 }
             };
             s.statement()?;
@@ -538,19 +550,22 @@ impl<'a, 'b> Compiler<'a, 'b> {
 
     fn expression_statement(&mut self, estimated_line: usize) -> CompileResult<()> {
         self.expression()?;
-        if let Ok(Token {
-            contents: TokenContents::Semicolon,
-            line,
-        }) = self.next_token()
-        {
-            self.chunk.add_opcode(Opcode::Pop, line);
-            Ok(())
-        } else {
-            Err(ParseError::GeneralError(format!(
+        match self.next_token() {
+            Ok(Token {
+                contents: TokenContents::Semicolon,
+                line,
+            }) => {
+                self.chunk.add_opcode(Opcode::Pop, line);
+                Ok(())
+            }
+            Ok(token) => {
+                Err(ParseError::MissingSemicolon(token.line, token.contents.to_string()).into())
+            }
+            _ => Err(ParseError::GeneralError(format!(
                 "Missing semicolon around line {}",
                 estimated_line
             ))
-            .into())
+            .into()),
         }
     }
 
@@ -956,6 +971,8 @@ pub enum ParseError {
     NotAVariableName(usize, String),
     #[error("[line {0}] Error at '{1}': Already a variable with this name in this scope.")]
     DuplicateLocal(usize, String),
+    #[error("[line {0}] Error at '{1}': Expect ';' after expression.")]
+    MissingSemicolon(usize, String),
     #[error("Compile error: {0}.")]
     GeneralError(String),
 }
