@@ -5,14 +5,14 @@ use std::ptr::NonNull;
 use std::sync::Arc;
 use std::{mem, ptr};
 
-pub struct Vec<T> {
+pub struct VMHeapVec<T> {
     cap: usize,
     len: usize,
     ptr: NonNull<T>,
     alloc: Arc<Allocator>,
 }
 
-impl<T> Vec<T> {
+impl<T> VMHeapVec<T> {
     pub fn new(alloc: Arc<Allocator>) -> Self {
         assert_ne!(mem::size_of::<T>(), 0, "ZSTs not supported");
         Self {
@@ -68,7 +68,7 @@ impl<T> Vec<T> {
     }
 }
 
-impl<T> Drop for Vec<T> {
+impl<T> Drop for VMHeapVec<T> {
     fn drop(&mut self) {
         if self.cap != 0 {
             while self.pop().is_some() {}
@@ -78,7 +78,7 @@ impl<T> Drop for Vec<T> {
     }
 }
 
-impl<T> Deref for Vec<T> {
+impl<T> Deref for VMHeapVec<T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
@@ -86,7 +86,7 @@ impl<T> Deref for Vec<T> {
     }
 }
 
-impl<T> DerefMut for Vec<T> {
+impl<T> DerefMut for VMHeapVec<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
     }

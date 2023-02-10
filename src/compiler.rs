@@ -1,5 +1,5 @@
 use crate::chunk::{Chunk, Opcode};
-use crate::heap::HeapManager;
+use crate::heap::{HeapManager, Object};
 use crate::scanner::{ScanError, ScanResult, Token, TokenContents};
 use crate::value::Value;
 use arrayvec::ArrayVec;
@@ -242,7 +242,9 @@ impl<'a, 'b> Compiler<'a, 'b> {
 
     fn identifier_constant(&mut self, id: &str) -> CompileResult<u8> {
         self.chunk
-            .add_constant(Value::Obj(self.heap_manager.create_string_copied(id)))
+            .add_constant(Value::Obj(Object::String(
+                self.heap_manager.new_str_copied(id),
+            )))
             .ok_or_else(|| CompileErrors::from(ParseError::TooManyConstants))
     }
 
@@ -742,7 +744,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
     fn parse_string(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
         match token.contents {
             TokenContents::String(s) => {
-                let value = Value::Obj(self.heap_manager.create_string_copied(s));
+                let value = Value::Obj(Object::String(self.heap_manager.new_str_copied(s)));
                 let constant = self
                     .chunk
                     .add_constant(value)

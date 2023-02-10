@@ -1,5 +1,5 @@
 use crate::heap::allocator::Allocator;
-use crate::heap::Vec;
+use crate::heap::VMHeapVec;
 use crate::value::Value;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::fmt::Write;
@@ -43,19 +43,19 @@ impl Opcode {
 }
 
 pub struct Chunk {
-    code: Vec<u8>,
-    constants: Vec<Value>,
+    code: VMHeapVec<u8>,
+    constants: VMHeapVec<Value>,
     name: String,
-    lines: Vec<usize>,
+    lines: VMHeapVec<usize>,
 }
 
 impl Chunk {
     pub fn new(name: String, alloc: Arc<Allocator>) -> Self {
         Self {
-            code: Vec::new(alloc.clone()),
-            constants: Vec::new(alloc.clone()),
+            code: VMHeapVec::new(alloc.clone()),
+            constants: VMHeapVec::new(alloc.clone()),
             name,
-            lines: Vec::new(alloc),
+            lines: VMHeapVec::new(alloc),
         }
     }
 

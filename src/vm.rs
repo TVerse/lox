@@ -1,7 +1,7 @@
 use crate::chunk::{Chunk, Opcode};
 use crate::heap::allocator::Allocator;
 use crate::heap::hash_table::HashTable;
-use crate::heap::HeapManager;
+use crate::heap::{HeapManager, Object};
 use crate::value::Value;
 use arrayvec::ArrayVec;
 use log::{error, trace};
@@ -67,24 +67,15 @@ impl<'a, W: Write> VM<'a, W> {
                         (Value::Number(_), Value::Number(_)) => {
                             self.binary_op(|a, b| a + b, Value::Number, chunk.line_for(self.ip))?
                         }
-                        (Value::Obj(a), Value::Obj(b)) => {
-                            match (a.as_objstring(), b.as_objstring()) {
-                                (Some(_), Some(_)) => self.concatenate()?,
-                                _ => {
-                                    return Err(RuntimeError::InvalidTypes(
-                                        chunk.line_for(self.ip),
-                                        "strings",
-                                    )
-                                    .into())
-                                }
-                            }
+                        (Value::Obj(Object::String(_)), Value::Obj(Object::String(_))) => {
+                            self.concatenate()?
                         }
                         _ => {
                             return Err(RuntimeError::InvalidTypes(
                                 chunk.line_for(self.ip),
                                 "two numbers or two strings",
                             )
-                            .into())
+                            .into());
                         }
                     };
                 }
@@ -126,13 +117,10 @@ impl<'a, W: Write> VM<'a, W> {
                     let name = self.read_constant(chunk)?;
                     match name {
                         Value::Obj(obj) => {
-                            if let Some(s) = obj.as_objstring() {
-                                let value = self.peek(0)?;
-                                self.globals.insert(s, *value);
-                                let _ = self.pop();
-                            } else {
-                                return Err(IncorrectInvariantError::InvalidTypes.into());
-                            }
+                            let Object::String(s) = obj;
+                            let value = self.peek(0)?;
+                            self.globals.insert(*s, *value);
+                            let _ = self.pop();
                         }
                         _ => return Err(IncorrectInvariantError::InvalidTypes.into()),
                     }
@@ -141,16 +129,11 @@ impl<'a, W: Write> VM<'a, W> {
                     let name = self.read_constant(chunk)?;
                     match name {
                         Value::Obj(obj) => {
-                            if let Some(s) = obj.as_objstring() {
-                                if let Some(v) = self.globals.get(s) {
-                                    self.push(*v)?;
-                                } else {
-                                    return Err(
-                                        RuntimeError::UndefinedVariable(obj.to_string()).into()
-                                    );
-                                }
+                            let Object::String(s) = obj;
+                            if let Some(v) = self.globals.get(*s) {
+                                self.push(*v)?;
                             } else {
-                                return Err(IncorrectInvariantError::InvalidTypes.into());
+                                return Err(RuntimeError::UndefinedVariable(obj.to_string()).into());
                             }
                         }
                         _ => return Err(IncorrectInvariantError::InvalidTypes.into()),
@@ -160,15 +143,10 @@ impl<'a, W: Write> VM<'a, W> {
                     let name = self.read_constant(chunk)?;
                     match name {
                         Value::Obj(obj) => {
-                            if let Some(s) = obj.as_objstring() {
-                                if self.globals.insert(s, *self.peek(0)?) {
-                                    self.globals.delete(s);
-                                    return Err(
-                                        RuntimeError::UndefinedVariable(obj.to_string()).into()
-                                    );
-                                }
-                            } else {
-                                return Err(IncorrectInvariantError::InvalidTypes.into());
+                            let Object::String(s) = obj;
+                            if self.globals.insert(*s, *self.peek(0)?) {
+                                self.globals.delete(*s);
+                                return Err(RuntimeError::UndefinedVariable(obj.to_string()).into());
                             }
                         }
                         _ => return Err(IncorrectInvariantError::InvalidTypes.into()),
@@ -261,7 +239,7 @@ impl<'a, W: Write> VM<'a, W> {
             (_, _) => {
                 return Err(VMError::RuntimeError(RuntimeError::InvalidTypes(
                     line, "numbers",
-                )))
+                )));
             }
         };
         self.push(res)?;
@@ -278,13 +256,10 @@ impl<'a, W: Write> VM<'a, W> {
         let b = self.pop()?;
         let a = self.pop()?;
         let (a, b) = match (a, b) {
-            (Value::Obj(a), Value::Obj(b)) => match (a.as_objstring(), b.as_objstring()) {
-                (Some(a), Some(b)) => (a, b),
-                _ => unreachable!(),
-            },
+            (Value::Obj(Object::String(a)), Value::Obj(Object::String(b))) => (a, b),
             _ => unreachable!(),
         };
-        let value = Value::Obj(self.heap_manager.create_string_concat(&a, &b));
+        let value = Value::Obj(Object::String(self.heap_manager.new_str_concat(&a, &b)));
         self.push(value)
     }
 }
