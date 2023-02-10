@@ -1,5 +1,5 @@
-use crate::heap::allocator::Allocator;
-use crate::heap::VMHeapVec;
+use crate::memory::allocator::Allocator;
+use crate::memory::VMHeapVec;
 use crate::value::Value;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::fmt::Write;

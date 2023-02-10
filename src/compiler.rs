@@ -1,5 +1,5 @@
 use crate::chunk::{Chunk, Opcode};
-use crate::heap::{HeapManager, Object};
+use crate::memory::{MemoryManager, Object};
 use crate::scanner::{ScanError, ScanResult, Token, TokenContents};
 use crate::value::Value;
 use arrayvec::ArrayVec;
@@ -50,7 +50,7 @@ impl BindingPower {
 
 pub fn compile<'a, 'b>(
     iter: &'b mut impl Iterator<Item = ScanResult<Token<'a>>>,
-    heap_manager: &'b mut HeapManager,
+    heap_manager: &'b mut MemoryManager,
 ) -> CompileResult<Chunk> {
     let chunk = Chunk::new("main".to_string(), heap_manager.alloc());
     let mut compiler = Compiler::new(iter, chunk, heap_manager);
@@ -67,7 +67,7 @@ pub fn compile<'a, 'b>(
 struct Compiler<'a, 'b> {
     iter: Peekable<&'b mut dyn Iterator<Item = ScanResult<Token<'a>>>>,
     chunk: Chunk,
-    heap_manager: &'b mut HeapManager,
+    heap_manager: &'b mut MemoryManager,
     errors: CompileErrors,
     locals: ArrayVec<Local<'a>, MAX_LOCALS>,
     scope_depth: usize,
@@ -83,7 +83,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
     fn new(
         iter: &'b mut impl Iterator<Item = ScanResult<Token<'a>>>,
         chunk: Chunk,
-        heap_manager: &'b mut HeapManager,
+        heap_manager: &'b mut MemoryManager,
     ) -> Self {
         let iter: &mut dyn Iterator<Item = ScanResult<Token<'a>>> = iter;
         Self {

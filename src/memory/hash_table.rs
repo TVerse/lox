@@ -1,5 +1,5 @@
-use crate::heap::allocator::Allocator;
-use crate::heap::{ObjString, VMHeap};
+use crate::memory::allocator::Allocator;
+use crate::memory::{ObjString, VMHeap};
 use crate::value::Value;
 use std::alloc::Layout;
 use std::fmt::{Debug, Formatter};
@@ -25,7 +25,7 @@ impl HashTable {
         }
     }
 
-    pub(in crate::heap) fn get_string(&self, key: NonNull<ObjString>) -> Option<VMHeap<ObjString>> {
+    pub(in crate::memory) fn get_string(&self, key: NonNull<ObjString>) -> Option<VMHeap<ObjString>> {
         if self.count == 0 {
             return None;
         }
@@ -237,7 +237,7 @@ impl Debug for Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::heap::HeapManager;
+    use crate::memory::MemoryManager;
 
     const MAX: usize = if cfg!(miri) { 17 } else { 2500 };
 
@@ -245,7 +245,7 @@ mod tests {
     fn insert() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let mut heap_manager = HeapManager::new(alloc.clone(), strings);
+        let mut heap_manager = MemoryManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
         let key = heap_manager.new_str_copied("hi!");
         let value = Value::Number(1.5);
@@ -257,7 +257,7 @@ mod tests {
     fn insert_multiple() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let mut heap_manager = HeapManager::new(alloc.clone(), strings);
+        let mut heap_manager = MemoryManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
         let kvs: Vec<_> = (0..MAX)
             .map(|i| {
@@ -281,7 +281,7 @@ mod tests {
     fn get() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let mut heap_manager = HeapManager::new(alloc.clone(), strings);
+        let mut heap_manager = MemoryManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
         let key = heap_manager.new_str_copied("hi!");
         let value = Value::Number(1.5);
@@ -295,7 +295,7 @@ mod tests {
     fn delete() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let mut heap_manager = HeapManager::new(alloc.clone(), strings);
+        let mut heap_manager = MemoryManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
         let kvs: Vec<_> = (0..MAX)
             .map(|i| {

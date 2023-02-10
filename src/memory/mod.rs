@@ -1,5 +1,5 @@
-use crate::heap::allocator::Allocator;
-use crate::heap::hash_table::HashTable;
+use crate::memory::allocator::Allocator;
+use crate::memory::hash_table::HashTable;
 use crate::value::Value;
 use std::alloc::Layout;
 use std::fmt::{Debug, Display, Formatter};
@@ -7,6 +7,7 @@ use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::{ptr, slice};
+use arrayvec::ArrayVec;
 
 pub mod allocator;
 pub mod hash_table;
@@ -14,19 +15,23 @@ mod vec;
 
 pub use vec::VMHeapVec;
 
+const STACK_SIZE: usize = 256;
+
 #[derive(Debug)]
-pub struct HeapManager {
+pub struct MemoryManager {
     known_objects: Option<Object>,
     alloc: Arc<Allocator>,
     strings: HashTable,
+    stack: ArrayVec<Value, STACK_SIZE>
 }
 
-impl HeapManager {
+impl MemoryManager {
     pub fn new(alloc: Arc<Allocator>, strings: HashTable) -> Self {
         Self {
             known_objects: None,
             alloc,
             strings,
+            stack: ArrayVec::new()
         }
     }
 
@@ -69,9 +74,17 @@ impl HeapManager {
         obj.drop_in_place();
         self.alloc.dealloc(ptr, layout);
     }
+
+    pub fn stack(&self) -> &ArrayVec<Value, STACK_SIZE> {
+        &self.stack
+    }
+
+    pub fn stack_mut(&mut self) -> &mut ArrayVec<Value, STACK_SIZE> {
+        &mut self.stack
+    }
 }
 
-impl Drop for HeapManager {
+impl Drop for MemoryManager {
     fn drop(&mut self) {
         let mut obj = self.known_objects;
         while let Some(mut ptr) = obj {
@@ -157,7 +170,7 @@ pub unsafe trait GCAble: private::GCAblePrivate {
 
 #[doc(hidden)]
 mod private {
-    use crate::heap::{ObjString, Object};
+    use crate::memory::{ObjString, Object};
 
     pub trait GCAblePrivate {}
     impl GCAblePrivate for Object {}
@@ -337,7 +350,7 @@ mod tests {
     fn string_interning() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let mut heap_manager = HeapManager::new(alloc, strings);
+        let mut heap_manager = MemoryManager::new(alloc, strings);
         let a = heap_manager.new_str_copied("hi!");
         let b = heap_manager.new_str_copied("hi!");
         let c = heap_manager.new_str_copied("hi!hi!");

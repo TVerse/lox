@@ -1,9 +1,8 @@
 use crate::chunk::{Chunk, Opcode};
-use crate::heap::allocator::Allocator;
-use crate::heap::hash_table::HashTable;
-use crate::heap::{HeapManager, Object};
+use crate::memory::allocator::Allocator;
+use crate::memory::hash_table::HashTable;
+use crate::memory::{MemoryManager, Object};
 use crate::value::Value;
-use arrayvec::ArrayVec;
 use log::{error, trace};
 use num_enum::TryFromPrimitiveError;
 use std::io::Write;
@@ -12,24 +11,20 @@ use thiserror::Error;
 
 type VMResult<A> = Result<A, VMError>;
 
-const STACK_SIZE: usize = 256;
 
 #[derive(Debug)]
 pub struct VM<'a, W: Write> {
     write: &'a mut W,
     ip: usize,
-    // could this be a list of refs? Runs into lifetime issues!
-    stack: ArrayVec<Value, STACK_SIZE>,
-    heap_manager: HeapManager,
+    heap_manager: MemoryManager,
     globals: HashTable,
 }
 
 impl<'a, W: Write> VM<'a, W> {
-    pub fn new(write: &'a mut W, heap_manager: HeapManager, allocator: Arc<Allocator>) -> Self {
+    pub fn new(write: &'a mut W, heap_manager: MemoryManager, allocator: Arc<Allocator>) -> Self {
         Self {
             write,
             ip: 0,
-            stack: ArrayVec::new(),
             heap_manager,
             globals: HashTable::new(allocator),
         }
@@ -38,7 +33,7 @@ impl<'a, W: Write> VM<'a, W> {
     pub fn run(&mut self, chunk: &Chunk) -> VMResult<()> {
         // TODO some kind of iterator?
         loop {
-            trace!("Stack:\n{stack:?}", stack = self.stack);
+            trace!("Stack:\n{stack:?}", stack = self.heap_manager.stack());
             trace!(
                 "Instruction at {ip}: {instruction}",
                 ip = self.ip,
@@ -154,11 +149,12 @@ impl<'a, W: Write> VM<'a, W> {
                 }
                 Opcode::SetLocal => {
                     let slot = self.read_byte(chunk)?;
-                    self.stack[slot as usize] = *self.peek(0)?;
+                    self.heap_manager.stack_mut()[slot as usize] = *self.peek(0)?;
                 }
                 Opcode::GetLocal => {
                     let slot = self.read_byte(chunk)?;
-                    self.push(self.stack[slot as usize])?;
+                    let val = self.heap_manager.stack_mut()[slot as usize];
+                    self.push(val)?;
                 }
                 Opcode::JumpIfFalse => {
                     let offset = self.read_short(chunk)?;
@@ -214,13 +210,13 @@ impl<'a, W: Write> VM<'a, W> {
     }
 
     fn push(&mut self, value: Value) -> VMResult<()> {
-        self.stack
+        self.heap_manager.stack_mut()
             .try_push(value)
             .map_err(|_| RuntimeError::StackOverflow.into())
     }
 
     fn pop(&mut self) -> VMResult<Value> {
-        self.stack
+        self.heap_manager.stack_mut()
             .pop()
             .ok_or_else(|| IncorrectInvariantError::StackUnderflow.into())
     }
@@ -247,8 +243,8 @@ impl<'a, W: Write> VM<'a, W> {
     }
 
     fn peek(&self, distance: usize) -> VMResult<&Value> {
-        self.stack
-            .get(self.stack.len() - distance - 1)
+        self.heap_manager.stack()
+            .get(self.heap_manager.stack().len() - distance - 1)
             .ok_or_else(|| IncorrectInvariantError::StackUnderflow.into())
     }
 

@@ -1,4 +1,4 @@
-use crate::heap::Object;
+use crate::memory::Object;
 use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Copy, Clone)]

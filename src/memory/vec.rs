@@ -1,4 +1,4 @@
-use crate::heap::allocator::Allocator;
+use crate::memory::allocator::Allocator;
 use std::alloc::Layout;
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
