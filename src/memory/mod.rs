@@ -1,13 +1,13 @@
 use crate::memory::allocator::Allocator;
 use crate::memory::hash_table::HashTable;
 use crate::value::Value;
+use arrayvec::ArrayVec;
 use std::alloc::Layout;
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::{ptr, slice};
-use arrayvec::ArrayVec;
 
 pub mod allocator;
 pub mod hash_table;
@@ -22,7 +22,7 @@ pub struct MemoryManager {
     known_objects: Option<Object>,
     alloc: Arc<Allocator>,
     strings: HashTable,
-    stack: ArrayVec<Value, STACK_SIZE>
+    stack: ArrayVec<Value, STACK_SIZE>,
 }
 
 impl MemoryManager {
@@ -31,7 +31,7 @@ impl MemoryManager {
             known_objects: None,
             alloc,
             strings,
-            stack: ArrayVec::new()
+            stack: ArrayVec::new(),
         }
     }
 
@@ -350,13 +350,13 @@ mod tests {
     fn string_interning() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let mut heap_manager = MemoryManager::new(alloc, strings);
-        let a = heap_manager.new_str_copied("hi!");
-        let b = heap_manager.new_str_copied("hi!");
-        let c = heap_manager.new_str_copied("hi!hi!");
+        let mut memory_manager = MemoryManager::new(alloc, strings);
+        let a = memory_manager.new_str_copied("hi!");
+        let b = memory_manager.new_str_copied("hi!");
+        let c = memory_manager.new_str_copied("hi!hi!");
         assert_eq!(a, b);
         assert_ne!(a, c);
-        let d = heap_manager.new_str_concat(&a, &b);
+        let d = memory_manager.new_str_concat(&a, &b);
         assert_eq!(c, d);
     }
 }

@@ -50,10 +50,10 @@ impl BindingPower {
 
 pub fn compile<'a, 'b>(
     iter: &'b mut impl Iterator<Item = ScanResult<Token<'a>>>,
-    heap_manager: &'b mut MemoryManager,
+    memory_manager: &'b mut MemoryManager,
 ) -> CompileResult<Chunk> {
-    let chunk = Chunk::new("main".to_string(), heap_manager.alloc());
-    let mut compiler = Compiler::new(iter, chunk, heap_manager);
+    let chunk = Chunk::new("main".to_string(), memory_manager.alloc());
+    let mut compiler = Compiler::new(iter, chunk, memory_manager);
     compiler.compile()?;
     let Compiler { mut chunk, .. } = compiler;
 
@@ -67,7 +67,7 @@ pub fn compile<'a, 'b>(
 struct Compiler<'a, 'b> {
     iter: Peekable<&'b mut dyn Iterator<Item = ScanResult<Token<'a>>>>,
     chunk: Chunk,
-    heap_manager: &'b mut MemoryManager,
+    memory_manager: &'b mut MemoryManager,
     errors: CompileErrors,
     locals: ArrayVec<Local<'a>, MAX_LOCALS>,
     scope_depth: usize,
@@ -83,13 +83,13 @@ impl<'a, 'b> Compiler<'a, 'b> {
     fn new(
         iter: &'b mut impl Iterator<Item = ScanResult<Token<'a>>>,
         chunk: Chunk,
-        heap_manager: &'b mut MemoryManager,
+        memory_manager: &'b mut MemoryManager,
     ) -> Self {
         let iter: &mut dyn Iterator<Item = ScanResult<Token<'a>>> = iter;
         Self {
             iter: iter.peekable(),
             chunk,
-            heap_manager,
+            memory_manager,
             errors: CompileErrors::default(),
             locals: ArrayVec::new(),
             scope_depth: 0,
@@ -243,7 +243,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
     fn identifier_constant(&mut self, id: &str) -> CompileResult<u8> {
         self.chunk
             .add_constant(Value::Obj(Object::String(
-                self.heap_manager.new_str_copied(id),
+                self.memory_manager.new_str_copied(id),
             )))
             .ok_or_else(|| CompileErrors::from(ParseError::TooManyConstants))
     }
@@ -744,7 +744,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
     fn parse_string(&mut self, token: &Token, _can_assign: bool) -> CompileResult<()> {
         match token.contents {
             TokenContents::String(s) => {
-                let value = Value::Obj(Object::String(self.heap_manager.new_str_copied(s)));
+                let value = Value::Obj(Object::String(self.memory_manager.new_str_copied(s)));
                 let constant = self
                     .chunk
                     .add_constant(value)

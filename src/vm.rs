@@ -11,21 +11,20 @@ use thiserror::Error;
 
 type VMResult<A> = Result<A, VMError>;
 
-
 #[derive(Debug)]
 pub struct VM<'a, W: Write> {
     write: &'a mut W,
     ip: usize,
-    heap_manager: MemoryManager,
+    memory_manager: MemoryManager,
     globals: HashTable,
 }
 
 impl<'a, W: Write> VM<'a, W> {
-    pub fn new(write: &'a mut W, heap_manager: MemoryManager, allocator: Arc<Allocator>) -> Self {
+    pub fn new(write: &'a mut W, memory_manager: MemoryManager, allocator: Arc<Allocator>) -> Self {
         Self {
             write,
             ip: 0,
-            heap_manager,
+            memory_manager,
             globals: HashTable::new(allocator),
         }
     }
@@ -33,7 +32,7 @@ impl<'a, W: Write> VM<'a, W> {
     pub fn run(&mut self, chunk: &Chunk) -> VMResult<()> {
         // TODO some kind of iterator?
         loop {
-            trace!("Stack:\n{stack:?}", stack = self.heap_manager.stack());
+            trace!("Stack:\n{stack:?}", stack = self.memory_manager.stack());
             trace!(
                 "Instruction at {ip}: {instruction}",
                 ip = self.ip,
@@ -149,11 +148,11 @@ impl<'a, W: Write> VM<'a, W> {
                 }
                 Opcode::SetLocal => {
                     let slot = self.read_byte(chunk)?;
-                    self.heap_manager.stack_mut()[slot as usize] = *self.peek(0)?;
+                    self.memory_manager.stack_mut()[slot as usize] = *self.peek(0)?;
                 }
                 Opcode::GetLocal => {
                     let slot = self.read_byte(chunk)?;
-                    let val = self.heap_manager.stack_mut()[slot as usize];
+                    let val = self.memory_manager.stack_mut()[slot as usize];
                     self.push(val)?;
                 }
                 Opcode::JumpIfFalse => {
@@ -210,13 +209,15 @@ impl<'a, W: Write> VM<'a, W> {
     }
 
     fn push(&mut self, value: Value) -> VMResult<()> {
-        self.heap_manager.stack_mut()
+        self.memory_manager
+            .stack_mut()
             .try_push(value)
             .map_err(|_| RuntimeError::StackOverflow.into())
     }
 
     fn pop(&mut self) -> VMResult<Value> {
-        self.heap_manager.stack_mut()
+        self.memory_manager
+            .stack_mut()
             .pop()
             .ok_or_else(|| IncorrectInvariantError::StackUnderflow.into())
     }
@@ -243,8 +244,9 @@ impl<'a, W: Write> VM<'a, W> {
     }
 
     fn peek(&self, distance: usize) -> VMResult<&Value> {
-        self.heap_manager.stack()
-            .get(self.heap_manager.stack().len() - distance - 1)
+        self.memory_manager
+            .stack()
+            .get(self.memory_manager.stack().len() - distance - 1)
             .ok_or_else(|| IncorrectInvariantError::StackUnderflow.into())
     }
 
@@ -255,7 +257,7 @@ impl<'a, W: Write> VM<'a, W> {
             (Value::Obj(Object::String(a)), Value::Obj(Object::String(b))) => (a, b),
             _ => unreachable!(),
         };
-        let value = Value::Obj(Object::String(self.heap_manager.new_str_concat(&a, &b)));
+        let value = Value::Obj(Object::String(self.memory_manager.new_str_concat(&a, &b)));
         self.push(value)
     }
 }

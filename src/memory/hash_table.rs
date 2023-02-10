@@ -25,7 +25,10 @@ impl HashTable {
         }
     }
 
-    pub(in crate::memory) fn get_string(&self, key: NonNull<ObjString>) -> Option<VMHeap<ObjString>> {
+    pub(in crate::memory) fn get_string(
+        &self,
+        key: NonNull<ObjString>,
+    ) -> Option<VMHeap<ObjString>> {
         if self.count == 0 {
             return None;
         }
@@ -245,9 +248,9 @@ mod tests {
     fn insert() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let mut heap_manager = MemoryManager::new(alloc.clone(), strings);
+        let mut memory_manager = MemoryManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
-        let key = heap_manager.new_str_copied("hi!");
+        let key = memory_manager.new_str_copied("hi!");
         let value = Value::Number(1.5);
         assert!(table.insert(key, value));
         assert!(!table.insert(key, value));
@@ -257,11 +260,11 @@ mod tests {
     fn insert_multiple() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let mut heap_manager = MemoryManager::new(alloc.clone(), strings);
+        let mut memory_manager = MemoryManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
         let kvs: Vec<_> = (0..MAX)
             .map(|i| {
-                let key = heap_manager.new_str_copied(&format!("hi{i}"));
+                let key = memory_manager.new_str_copied(&format!("hi{i}"));
                 let value = Value::Number(i as f64);
                 (key, value)
             })
@@ -281,9 +284,9 @@ mod tests {
     fn get() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let mut heap_manager = MemoryManager::new(alloc.clone(), strings);
+        let mut memory_manager = MemoryManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
-        let key = heap_manager.new_str_copied("hi!");
+        let key = memory_manager.new_str_copied("hi!");
         let value = Value::Number(1.5);
         assert_eq!(table.get(key), None);
         assert!(table.insert(key, value));
@@ -295,11 +298,11 @@ mod tests {
     fn delete() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let mut heap_manager = MemoryManager::new(alloc.clone(), strings);
+        let mut memory_manager = MemoryManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
         let kvs: Vec<_> = (0..MAX)
             .map(|i| {
-                let key = heap_manager.new_str_copied(&format!("hi{i}"));
+                let key = memory_manager.new_str_copied(&format!("hi{i}"));
                 let value = Value::Number(i as f64);
                 (key, value)
             })
