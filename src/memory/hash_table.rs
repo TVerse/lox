@@ -1,5 +1,5 @@
-use crate::heap::allocator::Allocator;
-use crate::heap::{BoxedObjString, ObjString};
+use crate::memory::allocator::Allocator;
+use crate::memory::{ObjString, VMHeap};
 use crate::value::Value;
 use std::alloc::Layout;
 use std::fmt::{Debug, Formatter};
@@ -25,7 +25,7 @@ impl HashTable {
         }
     }
 
-    pub(in crate::heap) fn get_string(&self, key: NonNull<ObjString>) -> Option<BoxedObjString> {
+    pub(in crate::memory) fn get_string(&self, key: NonNull<ObjString>) -> Option<VMHeap<ObjString>> {
         if self.count == 0 {
             return None;
         }
@@ -36,7 +36,7 @@ impl HashTable {
                 let entry = self.entries.as_ptr().add((index + i) % self.capacity);
                 match (*entry).key {
                     Some(entry_key) => {
-                        if entry_key.as_str() == ObjString::as_str(key) {
+                        if entry_key.as_str() == (*key.as_ptr()).as_str() {
                             return Some(entry_key);
                         }
                     }
@@ -62,7 +62,7 @@ impl HashTable {
         self.capacity = 0;
     }
 
-    pub fn get(&self, key: BoxedObjString) -> Option<&Value> {
+    pub fn get(&self, key: VMHeap<ObjString>) -> Option<&Value> {
         if self.count == 0 {
             return None;
         }
@@ -78,7 +78,7 @@ impl HashTable {
     }
 
     // TODO Option<Value>
-    pub fn delete(&mut self, key: BoxedObjString) -> bool {
+    pub fn delete(&mut self, key: VMHeap<ObjString>) -> bool {
         if self.count == 0 {
             return false;
         }
@@ -97,7 +97,7 @@ impl HashTable {
     }
 
     // TODO Option<Value>
-    pub fn insert(&mut self, key: BoxedObjString, value: Value) -> bool {
+    pub fn insert(&mut self, key: VMHeap<ObjString>, value: Value) -> bool {
         if (self.count + 1) as f64 > (self.capacity as f64) * Self::MAX_LOAD {
             let new_capacity = self.grow_capacity();
             self.adjust_capacity(new_capacity)
@@ -220,7 +220,7 @@ impl Debug for HashTable {
 }
 
 struct Entry {
-    key: Option<BoxedObjString>,
+    key: Option<VMHeap<ObjString>>,
     value: Value,
 }
 
@@ -229,7 +229,7 @@ impl Debug for Entry {
         f.debug_struct("Entry")
             .field("key", &self.key)
             .field("value", &self.value)
-            .field("key_val", &self.key.map(|k| ObjString::as_str(k.0)))
+            .field("key_val", &self.key.map(|k| k.as_str().to_string()))
             .finish()
     }
 }
@@ -237,7 +237,7 @@ impl Debug for Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::heap::HeapManager;
+    use crate::memory::MemoryManager;
 
     const MAX: usize = if cfg!(miri) { 17 } else { 2500 };
 
@@ -245,12 +245,9 @@ mod tests {
     fn insert() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let mut heap_manager = HeapManager::new(alloc.clone(), strings);
+        let mut heap_manager = MemoryManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
-        let key = {
-            let obj = heap_manager.create_string_copied("hi!");
-            obj.as_objstring().unwrap()
-        };
+        let key = heap_manager.new_str_copied("hi!");
         let value = Value::Number(1.5);
         assert!(table.insert(key, value));
         assert!(!table.insert(key, value));
@@ -260,14 +257,11 @@ mod tests {
     fn insert_multiple() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let mut heap_manager = HeapManager::new(alloc.clone(), strings);
+        let mut heap_manager = MemoryManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
         let kvs: Vec<_> = (0..MAX)
             .map(|i| {
-                let key = {
-                    let obj = heap_manager.create_string_copied(&format!("hi{i}"));
-                    obj.as_objstring().unwrap()
-                };
+                let key = heap_manager.new_str_copied(&format!("hi{i}"));
                 let value = Value::Number(i as f64);
                 (key, value)
             })
@@ -287,10 +281,9 @@ mod tests {
     fn get() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let mut heap_manager = HeapManager::new(alloc.clone(), strings);
+        let mut heap_manager = MemoryManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
-        let obj = heap_manager.create_string_copied("hi!");
-        let key = obj.as_objstring().unwrap();
+        let key = heap_manager.new_str_copied("hi!");
         let value = Value::Number(1.5);
         assert_eq!(table.get(key), None);
         assert!(table.insert(key, value));
@@ -302,14 +295,11 @@ mod tests {
     fn delete() {
         let alloc = Allocator::new();
         let strings = HashTable::new(alloc.clone());
-        let mut heap_manager = HeapManager::new(alloc.clone(), strings);
+        let mut heap_manager = MemoryManager::new(alloc.clone(), strings);
         let mut table = HashTable::new(alloc);
         let kvs: Vec<_> = (0..MAX)
             .map(|i| {
-                let key = {
-                    let obj = heap_manager.create_string_copied(&format!("hi{i}"));
-                    obj.as_objstring().unwrap()
-                };
+                let key = heap_manager.new_str_copied(&format!("hi{i}"));
                 let value = Value::Number(i as f64);
                 (key, value)
             })

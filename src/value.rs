@@ -1,12 +1,12 @@
-use crate::heap::BoxedObject;
+use crate::memory::Object;
 use std::fmt::{Display, Formatter};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Copy, Clone)]
 pub enum Value {
     Number(f64),
     Boolean(bool),
     Nil,
-    Obj(BoxedObject),
+    Obj(Object),
 }
 
 impl PartialEq for Value {
@@ -14,7 +14,7 @@ impl PartialEq for Value {
         match (self, other) {
             (Value::Number(a), Value::Number(b)) => a == b,
             (Value::Boolean(a), Value::Boolean(b)) => a == b,
-            (Value::Obj(a), Value::Obj(b)) => a == b,
+            (Value::Obj(a), Value::Obj(b)) => *a == *b,
             (Value::Nil, Value::Nil) => true,
             _ => false,
         }
